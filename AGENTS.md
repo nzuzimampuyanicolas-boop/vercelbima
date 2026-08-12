@@ -728,3 +728,22 @@ Mettre à jour la documentation lorsque :
 - une décision produit durable est prise.
 
 Si Nicolas corrige une hypothèse ou une règle récurrente, proposer de mettre à jour ce fichier afin que les prochaines sessions Codex conservent la décision.
+
+## 27. Transmission vers le chat Site vitrine
+
+Après chaque modification fonctionnelle, produit, UX/UI ou éditoriale apportée à BIMA, créer un nouveau fichier Markdown dans `handoffs/site-vitrine/`.
+
+Le fichier doit :
+
+- être daté et porter un nom explicite au format `AAAA-MM-JJ-sujet.md` ;
+- être directement transmissible au chat « Site vitrine » sans contexte supplémentaire ;
+- résumer uniquement les changements réellement terminés et vérifiés ;
+- expliquer le bénéfice utilisateur et l’impact éventuel sur la promesse du produit ;
+- indiquer précisément les textes, sections ou démonstrations de la vitrine à mettre à jour ;
+- préciser ce qui ne doit pas être annoncé lorsque la fonctionnalité est technique, privée, expérimentale ou non validée ;
+- contenir l’URL publique à tester si elle est pertinente ;
+- distinguer clairement les éléments obligatoires des suggestions facultatives.
+
+Ne jamais annoncer sur la vitrine une fonctionnalité qui n’est pas publiée et vérifiée. Pour une modification purement interne sans effet visible ou commercial, créer tout de même le fichier en indiquant explicitement qu’aucune mise à jour publique de la vitrine n’est nécessaire.
+
+À la fin de la tâche, fournir à Nicolas un lien cliquable vers ce fichier Markdown.
