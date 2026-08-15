@@ -4,7 +4,7 @@ Date : 15 août 2026
 
 ## Statut
 
-L’image Open Graph de l’application utilise désormais le fichier officiel `Logo BIMA Carré.png`, avec sa transparence, ses couleurs et les détails du visage central conservés. La version locale a été vérifiée avant publication.
+L’image Open Graph publique de l’application utilise désormais le fichier officiel `Logo BIMA Carré.png`, avec sa transparence, ses couleurs et les détails du visage central conservés. La version servie par Vercel a été vérifiée par comparaison d’empreinte avec le fichier source déployé.
 
 ## Changements terminés et vérifiés
 
