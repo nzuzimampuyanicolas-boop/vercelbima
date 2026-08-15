@@ -35,7 +35,7 @@ button { cursor: pointer; }
 .hero { min-height: 655px; max-width: 1220px; margin: auto; padding: 58px 28px 45px; display: grid; grid-template-columns: .95fr 1.05fr; align-items: center; gap: 70px; }
 .eyebrow { display: inline-flex; align-items: center; gap: 9px; font-family: var(--font-geist-mono); text-transform: uppercase; font-weight: 800; font-size: 12px; letter-spacing: .06em; }
 .eyebrow span { color: var(--coral); font-size: 17px; }
-.hero h1 { font-size: clamp(54px,6.5vw,92px); line-height: .91; letter-spacing: -.075em; margin: 25px 0 30px; max-width: 650px; }
+.hero h1 { font-size: clamp(54px,6.5vw,92px); line-height: .91; letter-spacing: -.075em; margin: 25px 0 30px; max-width: 650px; font-weight: 800; }
 .hero h1 em { font-family: inherit; font-style: normal; font-weight: 800; color: var(--coral); }
 .hero-copy > p { color: var(--muted); font-size: 18px; line-height: 1.6; max-width: 520px; margin-bottom: 30px; }
 .hero-copy > small { display: block; margin-top: 13px; margin-left: 16px; color: var(--muted); font-size: 12px; }
@@ -279,7 +279,7 @@ button { cursor: pointer; }
 .not-found-heading { display: grid; justify-items: center; gap: 14px; }
 .not-found-heading .step-label { color: var(--coral); }
 .not-found-heading > p { margin: 0; color: var(--blue); font-size: clamp(86px,17vw,128px); font-weight: 950; line-height: .72; letter-spacing: -.09em; }
-.not-found-card h1 { margin: 22px 0 12px; font-size: clamp(36px,5vw,52px); line-height: .98; letter-spacing: -.06em; }
+.not-found-card h1 { margin: 22px 0 12px; font-size: clamp(36px,5vw,52px); line-height: .98; letter-spacing: -.06em; font-weight: 800; }
 .not-found-copy { max-width: 570px; margin: 0; color: var(--muted); font-size: clamp(16px,2.2vw,19px); line-height: 1.6; }
 .not-found-cta { min-height: 52px; margin-top: 24px; padding-inline: 24px; }
 .not-found-cta:focus-visible,.not-found-brand:focus-visible { outline: 3px solid var(--blue); outline-offset: 5px; }
