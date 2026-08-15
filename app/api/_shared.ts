@@ -7,9 +7,15 @@ export const bimaResponseHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+  "Access-Control-Expose-Headers": "Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining",
   "Access-Control-Max-Age": "86400",
   "Cache-Control": "no-store",
 };
+
+function clientIp(request: Request) {
+  const forwarded = request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+  return (forwarded || request.headers.get("x-real-ip") || "").slice(0, 128);
+}
 
 export function bimaBackendUrl(path: string) {
   const baseUrl = (process.env.BIMA_API_URL || DEFAULT_BIMA_API_URL).replace(/\/$/, "");
@@ -35,6 +41,13 @@ export async function proxyBima(
       if (value) headers.set(name, value);
     }
 
+    const proxySecret = process.env.NOTIFICATION_SECRET?.trim();
+    const requesterIp = clientIp(request);
+    if (proxySecret && requesterIp) {
+      headers.set("x-bima-proxy-secret", proxySecret);
+      headers.set("x-bima-client-ip", requesterIp);
+    }
+
     const method = request.method.toUpperCase();
     const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
     const upstream = await fetch(`${bimaBackendUrl(path)}${search}`, {
@@ -45,7 +58,13 @@ export async function proxyBima(
     });
 
     const outgoingHeaders = new Headers(bimaResponseHeaders);
-    for (const name of ["content-type", "content-disposition"]) {
+    for (const name of [
+      "content-type",
+      "content-disposition",
+      "retry-after",
+      "x-ratelimit-limit",
+      "x-ratelimit-remaining",
+    ]) {
       const value = upstream.headers.get(name);
       if (value) outgoingHeaders.set(name, value);
     }

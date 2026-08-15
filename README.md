@@ -31,7 +31,7 @@ CRON_SECRET=
 BIMA_PUBLIC_URL=https://bima-app-sigma.vercel.app
 ```
 
-Les secrets Supabase de rôle service restent exclusivement dans l’Edge Function et ne doivent jamais être exposés au navigateur.
+Les secrets Supabase de rôle service restent exclusivement dans l’Edge Function et ne doivent jamais être exposés au navigateur. `NOTIFICATION_SECRET` protège aussi les échanges serveur-à-serveur utilisés pour transmettre l’identité réseau au limiteur ; sa valeur reste uniquement dans Vercel et son empreinte est stockée dans Supabase.
 
 ## Notifications organisateur
 
@@ -47,6 +47,12 @@ Chaque notification possède une clé d’idempotence unique afin d’éviter le
 Les nouvelles sorties activent automatiquement ces notifications. Les sorties créées avant la migration restent inactives afin qu’aucun ancien organisateur ne reçoive un message rétroactif ; l’organisateur peut les activer depuis sa page de gestion. Il peut y désactiver séparément les nouvelles réponses et les moments importants.
 
 La table `bima_notification_deliveries` ne stocke pas l’adresse e-mail : elle conserve uniquement le type, l’état technique et les données minimales nécessaires à l’envoi. L’adresse est relue depuis la sortie au moment du traitement.
+
+## Protection anti-abus
+
+Toutes les interfaces passent par la même limitation dans l’Edge Function Supabase. Les compteurs Postgres sont incrémentés atomiquement et regroupés par type d’action. Les créations sont limitées à 5 par heure et par connexion ; les aperçus de lieux, votes, lectures et actions privées utilisent des seuils adaptés à leur coût et à leur usage normal.
+
+L’identité réseau est hachée avec un secret serveur avant la création du compteur. Une empreinte technique minimale est utilisée uniquement lorsque l’adresse réseau est indisponible. Aucune adresse IP n’est conservée en clair. Les compteurs expirés sont supprimés automatiquement. Une requête refusée reçoit le statut HTTP `429`, un message compréhensible et l’en-tête `Retry-After`.
 
 ## Modèle temporel
 

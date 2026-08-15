@@ -11,13 +11,19 @@ const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+  "Access-Control-Expose-Headers": "Retry-After, X-RateLimit-Limit, X-RateLimit-Remaining",
   "Access-Control-Max-Age": "86400",
 }
 
-function json(data: unknown, status = 200) {
+function json(data: unknown, status = 200, extraHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { ...corsHeaders, "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
+    headers: {
+      ...corsHeaders,
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      ...extraHeaders,
+    },
   })
 }
 
@@ -28,6 +34,125 @@ function cleanText(value: unknown, maxLength: number) {
 async function sha256(value: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")
+}
+
+type RateLimitPolicy = {
+  scope: string
+  limit: number
+  windowSeconds: number
+  discriminator?: string
+}
+
+type RateLimitRow = {
+  allowed: boolean
+  remaining: number
+  retry_after: number
+}
+
+const rateLimitPolicies = {
+  placePreview: { scope: "place-preview", limit: 20, windowSeconds: 600 },
+  createEvent: { scope: "event-create", limit: 5, windowSeconds: 3600 },
+  eventRead: { scope: "event-read", limit: 120, windowSeconds: 60 },
+  shortLinkRead: { scope: "short-link-read", limit: 120, windowSeconds: 60 },
+  vote: { scope: "event-vote", limit: 40, windowSeconds: 600 },
+  organizerMutation: { scope: "organizer-mutation", limit: 30, windowSeconds: 600 },
+  calendar: { scope: "calendar", limit: 30, windowSeconds: 600 },
+  admin: { scope: "admin", limit: 20, windowSeconds: 900 },
+} as const
+
+function constantTimeEqual(left: string, right: string) {
+  if (!left || left.length !== right.length) return false
+  let difference = 0
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index)
+  }
+  return difference === 0
+}
+
+function firstForwardedIp(value: string | null) {
+  return cleanText(value?.split(",")[0], 128)
+}
+
+let notificationSecretHashCache: { value: string; expiresAt: number } | null = null
+
+async function notificationSecretHash() {
+  if (notificationSecretHashCache && notificationSecretHashCache.expiresAt > Date.now()) {
+    return notificationSecretHashCache.value
+  }
+  const { data, error } = await db
+    .from("bima_config")
+    .select("value")
+    .eq("key", "notification_secret_hash")
+    .maybeSingle()
+  assertDatabase(error, "Impossible de vérifier le secret serveur.")
+  const value = cleanText(data?.value, 128)
+  notificationSecretHashCache = { value, expiresAt: Date.now() + 60_000 }
+  return value
+}
+
+async function requestIdentity(request: Request) {
+  const suppliedProxySecret = request.headers.get("x-bima-proxy-secret") || ""
+  const expectedSecretHash = suppliedProxySecret ? await notificationSecretHash() : ""
+  const suppliedSecretHash = suppliedProxySecret ? await sha256(suppliedProxySecret) : ""
+  const trustedProxy = constantTimeEqual(suppliedSecretHash, expectedSecretHash)
+  const trustedClientIp = trustedProxy
+    ? cleanText(request.headers.get("x-bima-client-ip"), 128)
+    : ""
+  const edgeClientIp = cleanText(request.headers.get("cf-connecting-ip"), 128)
+    || cleanText(request.headers.get("x-real-ip"), 128)
+    || firstForwardedIp(request.headers.get("x-forwarded-for"))
+  const fallbackFingerprint = [
+    cleanText(request.headers.get("user-agent"), 160),
+    cleanText(request.headers.get("accept-language"), 80),
+  ].join("|")
+  const clientIp = trustedClientIp || edgeClientIp
+  return clientIp ? `ip:${clientIp}` : `fingerprint:${fallbackFingerprint || "unknown"}`
+}
+
+async function consumeRateLimit(request: Request, policy: RateLimitPolicy) {
+  const identityHash = await sha256(`${serviceRoleKey}:${await requestIdentity(request)}`)
+  const bucket = await sha256(`${policy.scope}:${policy.discriminator || "global"}:${identityHash}`)
+  const { data, error } = await db.rpc("bima_consume_rate_limit", {
+    p_bucket: bucket,
+    p_limit: policy.limit,
+    p_window_seconds: policy.windowSeconds,
+  })
+  assertDatabase(error, "Impossible de vérifier la limite de requêtes.")
+  const result = (data as RateLimitRow[] | null)?.[0]
+  if (!result) throw new Error("Réponse de limitation invalide.")
+  return result
+}
+
+async function rateLimited(
+  request: Request,
+  policy: RateLimitPolicy,
+  operation: () => Promise<Response>,
+) {
+  const result = await consumeRateLimit(request, policy)
+  if (result.allowed) {
+    const response = await operation()
+    const headers = new Headers(response.headers)
+    headers.set("X-RateLimit-Limit", String(policy.limit))
+    headers.set("X-RateLimit-Remaining", String(result.remaining))
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    })
+  }
+  return json(
+    {
+      error: "Trop de demandes depuis cette connexion. Patiente un moment puis réessaie.",
+      code: "rate_limit_exceeded",
+      retryAfter: result.retry_after,
+    },
+    429,
+    {
+      "Retry-After": String(result.retry_after),
+      "X-RateLimit-Limit": String(policy.limit),
+      "X-RateLimit-Remaining": String(result.remaining),
+    },
+  )
 }
 
 function makeToken() {
@@ -233,9 +358,8 @@ async function hasNotificationAccess(request: Request) {
   const authorization = request.headers.get("authorization") || ""
   const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : ""
   if (!token) return false
-  const { data, error } = await db.from("bima_config").select("value").eq("key", "notification_secret_hash").maybeSingle()
-  assertDatabase(error, "Impossible de vérifier l’accès aux notifications.")
-  return Boolean(data?.value) && await sha256(token) === data.value
+  const expectedSecretHash = await notificationSecretHash()
+  return constantTimeEqual(await sha256(token), expectedSecretHash)
 }
 
 type CreatePlace = {
@@ -1051,22 +1175,37 @@ Deno.serve(async (request: Request) => {
     const markerIndex = url.pathname.indexOf(marker)
     const route = markerIndex >= 0 ? url.pathname.slice(markerIndex + marker.length) || "/" : url.pathname
     if (request.method === "GET" && route === "/health") return json({ ok: true, service: "bima-api" })
-    if (request.method === "POST" && route === "/api/places") return await resolvePlace(request)
-    if (request.method === "POST" && route === "/api/events") return await createEvent(request)
+    if (request.method === "POST" && route === "/api/places") {
+      return await rateLimited(request, rateLimitPolicies.placePreview, () => resolvePlace(request))
+    }
+    if (request.method === "POST" && route === "/api/events") {
+      return await rateLimited(request, rateLimitPolicies.createEvent, () => createEvent(request))
+    }
     if (request.method === "POST" && route === "/api/notifications/process") return await processNotifications(request)
     if (request.method === "POST" && route === "/api/notifications/complete") return await completeNotifications(request)
-    if (request.method === "GET" && route === "/api/admin/data") return await adminData(request)
-    if (request.method === "POST" && route === "/api/admin/delete") return await adminDelete(request)
+    if (request.method === "GET" && route === "/api/admin/data") {
+      return await rateLimited(request, rateLimitPolicies.admin, () => adminData(request))
+    }
+    if (request.method === "POST" && route === "/api/admin/delete") {
+      return await rateLimited(request, rateLimitPolicies.admin, () => adminDelete(request))
+    }
     const shortMatch = route.match(/^\/api\/short\/(manage|participant)\/([^/]+)$/)
     if (request.method === "GET" && shortMatch) {
-      return await readShortLink(shortMatch[1] as "manage" | "participant", decodeURIComponent(shortMatch[2]))
+      return await rateLimited(request, rateLimitPolicies.shortLinkRead, () => (
+        readShortLink(shortMatch[1] as "manage" | "participant", decodeURIComponent(shortMatch[2]))
+      ))
     }
     const participantDeleteMatch = route.match(/^\/api\/events\/([^/]+)\/participants\/([^/]+)\/delete$/)
     if (request.method === "POST" && participantDeleteMatch) {
-      return await deleteParticipant(
+      const slug = decodeURIComponent(participantDeleteMatch[1])
+      return await rateLimited(
         request,
-        decodeURIComponent(participantDeleteMatch[1]),
-        decodeURIComponent(participantDeleteMatch[2]),
+        { ...rateLimitPolicies.organizerMutation, discriminator: slug },
+        () => deleteParticipant(
+          request,
+          slug,
+          decodeURIComponent(participantDeleteMatch[2]),
+        ),
       )
     }
     const match = route.match(/^\/api\/events\/([^/]+)(?:\/(votes|confirm|calendar|delete|notifications))?$/)
@@ -1074,20 +1213,58 @@ Deno.serve(async (request: Request) => {
       const slug = decodeURIComponent(match[1])
       const action = match[2]
       if (request.method === "GET" && !action) {
-        return json(await readEvent(
-          slug,
-          url.searchParams.get("manage"),
-          url.searchParams.get("participant"),
-          url.searchParams.get("manageShort"),
-          url.searchParams.get("participantShort"),
+        return await rateLimited(request, rateLimitPolicies.eventRead, async () => (
+          json(await readEvent(
+            slug,
+            url.searchParams.get("manage"),
+            url.searchParams.get("participant"),
+            url.searchParams.get("manageShort"),
+            url.searchParams.get("participantShort"),
+          ))
         ))
       }
-      if (request.method === "PATCH" && !action) return await updateEvent(request, slug)
-      if (request.method === "POST" && action === "votes") return await submitVote(request, slug)
-      if (request.method === "POST" && action === "notifications") return await updateNotificationPreferences(request, slug)
-      if (request.method === "POST" && action === "confirm") return await confirmDate(request, slug)
-      if (request.method === "POST" && action === "delete") return await deleteEvent(request, slug)
-      if (request.method === "GET" && action === "calendar") return await calendar(slug)
+      if (request.method === "PATCH" && !action) {
+        return await rateLimited(
+          request,
+          { ...rateLimitPolicies.organizerMutation, discriminator: slug },
+          () => updateEvent(request, slug),
+        )
+      }
+      if (request.method === "POST" && action === "votes") {
+        return await rateLimited(
+          request,
+          { ...rateLimitPolicies.vote, discriminator: slug },
+          () => submitVote(request, slug),
+        )
+      }
+      if (request.method === "POST" && action === "notifications") {
+        return await rateLimited(
+          request,
+          { ...rateLimitPolicies.organizerMutation, discriminator: slug },
+          () => updateNotificationPreferences(request, slug),
+        )
+      }
+      if (request.method === "POST" && action === "confirm") {
+        return await rateLimited(
+          request,
+          { ...rateLimitPolicies.organizerMutation, discriminator: slug },
+          () => confirmDate(request, slug),
+        )
+      }
+      if (request.method === "POST" && action === "delete") {
+        return await rateLimited(
+          request,
+          { ...rateLimitPolicies.organizerMutation, discriminator: slug },
+          () => deleteEvent(request, slug),
+        )
+      }
+      if (request.method === "GET" && action === "calendar") {
+        return await rateLimited(
+          request,
+          { ...rateLimitPolicies.calendar, discriminator: slug },
+          () => calendar(slug),
+        )
+      }
     }
     return json({ error: "Route introuvable." }, 404)
   } catch (error) {

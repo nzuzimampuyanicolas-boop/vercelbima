@@ -259,3 +259,34 @@ test("publishes crawl rules, a focused sitemap, and route-specific metadata", as
   assert.match(participantPage, /path: `\/p\/\$\{encodeURIComponent\(code\)\}`/);
   assert.match(participantPage, /index: false/);
 });
+
+test("rate limits public API abuse without storing client IP addresses in clear text", async () => {
+  const [migration, edgeApi, proxy, envExample, readme] = await Promise.all([
+    source("supabase/migrations/20260815181616_add_api_rate_limits.sql"),
+    source("supabase/functions/bima-api/index.ts"),
+    source("app/api/_shared.ts"),
+    source(".env.example"),
+    source("README.md"),
+  ]);
+
+  assert.match(migration, /create table if not exists public\.bima_rate_limits/i);
+  assert.match(migration, /enable row level security/i);
+  assert.match(migration, /on conflict \(bucket\) do update/i);
+  assert.match(migration, /security invoker/i);
+  assert.match(migration, /revoke execute on function public\.bima_consume_rate_limit[\s\S]*from public, anon, authenticated/i);
+  assert.match(migration, /grant execute on function public\.bima_consume_rate_limit[\s\S]*to service_role/i);
+  assert.match(edgeApi, /sha256\(`\$\{serviceRoleKey\}:\$\{await requestIdentity\(request\)\}`\)/);
+  assert.match(edgeApi, /db\.rpc\("bima_consume_rate_limit"/);
+  assert.match(edgeApi, /code: "rate_limit_exceeded"/);
+  assert.match(edgeApi, /"Retry-After": String\(result\.retry_after\)/);
+  assert.match(edgeApi, /createEvent: \{ scope: "event-create", limit: 5, windowSeconds: 3600 \}/);
+  assert.match(edgeApi, /rateLimitPolicies\.placePreview/);
+  assert.match(edgeApi, /rateLimitPolicies\.vote/);
+  assert.match(edgeApi, /rateLimitPolicies\.admin/);
+  assert.doesNotMatch(migration, /client_ip|ip_address/i);
+  assert.match(proxy, /process\.env\.NOTIFICATION_SECRET/);
+  assert.match(proxy, /headers\.set\("x-bima-client-ip", requesterIp\)/);
+  assert.match(proxy, /"retry-after"/);
+  assert.doesNotMatch(envExample, /BIMA_PROXY_SECRET=/);
+  assert.match(readme, /NOTIFICATION_SECRET/);
+});
