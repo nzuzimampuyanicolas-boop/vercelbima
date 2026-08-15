@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
@@ -200,4 +200,19 @@ test("queues idempotent organizer notifications and exposes explicit preferences
   assert.match(cronRoute, /process\.env\.CRON_SECRET/);
   assert.match(votesRoute, /after\(async/);
   assert.match(vercel, /\/api\/cron\/notifications/);
+});
+
+test("publishes the BIMA image in social preview metadata", async () => {
+  const [layout, image] = await Promise.all([
+    source("app/layout.tsx"),
+    stat(new URL("public/og.png", root)),
+  ]);
+
+  assert.match(layout, /url: "\/og\.png"/);
+  assert.match(layout, /width: 1536/);
+  assert.match(layout, /height: 1024/);
+  assert.match(layout, /images: \[socialImage\]/);
+  assert.match(layout, /card: "summary_large_image"/);
+  assert.match(layout, /alt: "BIMA — La sortie qui sort du groupe\."/);
+  assert.ok(image.size > 0);
 });
