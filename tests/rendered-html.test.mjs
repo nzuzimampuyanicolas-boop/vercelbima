@@ -203,16 +203,59 @@ test("queues idempotent organizer notifications and exposes explicit preferences
 });
 
 test("publishes the BIMA image in social preview metadata", async () => {
-  const [layout, image] = await Promise.all([
+  const [layout, seo, image] = await Promise.all([
     source("app/layout.tsx"),
+    source("app/lib/seo.ts"),
     stat(new URL("public/og.png", root)),
   ]);
 
-  assert.match(layout, /url: "\/og\.png"/);
-  assert.match(layout, /width: 1536/);
-  assert.match(layout, /height: 1024/);
+  assert.match(seo, /url: "\/og\.png"/);
+  assert.match(seo, /width: 1536/);
+  assert.match(seo, /height: 1024/);
   assert.match(layout, /images: \[socialImage\]/);
   assert.match(layout, /card: "summary_large_image"/);
-  assert.match(layout, /alt: "BIMA — La sortie qui sort du groupe\."/);
+  assert.match(seo, /alt: "BIMA — La sortie qui sort du groupe\."/);
   assert.ok(image.size > 0);
+});
+
+test("publishes crawl rules, a focused sitemap, and route-specific metadata", async () => {
+  const [
+    layout,
+    seo,
+    robots,
+    sitemap,
+    privacy,
+    eventPage,
+    adminLayout,
+    managePage,
+    participantPage,
+  ] = await Promise.all([
+    source("app/layout.tsx"),
+    source("app/lib/seo.ts"),
+    source("app/robots.ts"),
+    source("app/sitemap.ts"),
+    source("app/confidentialite/page.tsx"),
+    source("app/e/[slug]/page.tsx"),
+    source("app/admin/layout.tsx"),
+    source("app/m/[code]/page.tsx"),
+    source("app/p/[code]/page.tsx"),
+  ]);
+
+  assert.match(layout, /template: "%s \| BIMA"/);
+  assert.match(layout, /alternates: \{ canonical: "\/" \}/);
+  assert.match(seo, /max-image-preview/);
+  assert.match(robots, /disallow: \["\/admin", "\/api\/", "\/m\/", "\/p\/"\]/);
+  assert.match(robots, /sitemap: `\$\{siteUrl\}\/sitemap\.xml`/);
+  assert.match(sitemap, /`\$\{siteUrl\}\/confidentialite`/);
+  assert.doesNotMatch(sitemap, /\/admin|\/api\/|\/m\/|\/p\/|\/e\//);
+  assert.match(privacy, /path: "\/confidentialite"/);
+  assert.match(eventPage, /generateMetadata/);
+  assert.match(eventPage, /index: false/);
+  assert.match(eventPage, /Indique tes disponibilités/);
+  assert.match(adminLayout, /path: "\/admin"/);
+  assert.match(adminLayout, /index: false/);
+  assert.match(managePage, /path: `\/m\/\$\{encodeURIComponent\(code\)\}`/);
+  assert.match(managePage, /index: false/);
+  assert.match(participantPage, /path: `\/p\/\$\{encodeURIComponent\(code\)\}`/);
+  assert.match(participantPage, /index: false/);
 });

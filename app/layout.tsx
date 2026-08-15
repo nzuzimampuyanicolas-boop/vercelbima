@@ -1,22 +1,27 @@
 import type { Metadata } from "next";
 import "./globals.css";
-
-const deploymentHost =
-  process.env.VERCEL_PROJECT_PRODUCTION_URL ||
-  process.env.VERCEL_URL ||
-  "bima-app-sigma.vercel.app";
-
-const socialImage = {
-  url: "/og.png",
-  width: 1536,
-  height: 1024,
-  alt: "BIMA — La sortie qui sort du groupe.",
-};
+import { defaultDescription, siteUrl, socialImage } from "./lib/seo";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(`https://${deploymentHost}`),
-  title: "Bima — Enfin, on se décide",
-  description: "Propose des dates, récolte les disponibilités et confirme votre prochaine sortie.",
+  metadataBase: new URL(siteUrl),
+  applicationName: "BIMA",
+  title: {
+    default: "BIMA — Enfin, on se décide",
+    template: "%s | BIMA",
+  },
+  description: defaultDescription,
+  alternates: { canonical: "/" },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
+  },
   referrer: "no-referrer",
   icons: { icon: "/bima-logo.svg", shortcut: "/bima-logo.svg", apple: "/bima-logo.svg" },
   openGraph: {
@@ -24,13 +29,13 @@ export const metadata: Metadata = {
     locale: "fr_FR",
     url: "/",
     siteName: "BIMA",
-    title: "Bima — Enfin, on se décide",
+    title: "BIMA — Enfin, on se décide",
     description: "Propose des dates, découvre le lieu et confirme votre prochaine sortie.",
     images: [socialImage],
   },
   twitter: {
     card: "summary_large_image",
-    title: "Bima — Enfin, on se décide",
+    title: "BIMA — Enfin, on se décide",
     description: "Propose des dates, découvre le lieu et confirme votre prochaine sortie.",
     images: [socialImage],
   },

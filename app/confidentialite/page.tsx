@@ -1,10 +1,13 @@
+import type { Metadata } from "next";
 import Image from "next/image";
 import Link from "next/link";
+import { createPageMetadata } from "../lib/seo";
 
-export const metadata = {
-  title: "Confidentialité — BIMA",
-  description: "Informations sur les données utilisées par BIMA pour organiser une sortie.",
-};
+export const metadata: Metadata = createPageMetadata({
+  title: "Confidentialité",
+  description: "Découvre quelles données BIMA utilise pour organiser une sortie et comment elles peuvent être supprimées.",
+  path: "/confidentialite",
+});
 
 export default function PrivacyPage() {
   return (
