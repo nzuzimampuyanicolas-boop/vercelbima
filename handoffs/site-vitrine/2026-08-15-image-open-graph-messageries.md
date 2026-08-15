@@ -4,9 +4,9 @@ Date : 15 août 2026
 
 ## Statut
 
-L’image Open Graph existante de BIMA est maintenant reliée aux métadonnées sociales de l’application. La modification doit encore être publiée et vérifiée sur l’URL publique.
+L’image Open Graph existante de BIMA est maintenant reliée aux métadonnées sociales de l’application. La modification est publiée et vérifiée sur l’URL publique.
 
-## Changements terminés localement
+## Changements terminés et vérifiés
 
 - déclaration de l’image `/og.png` dans les métadonnées Open Graph ;
 - déclaration de la même image pour Twitter/X ;
@@ -35,9 +35,9 @@ Si la vitrine Framer utilise ses propres paramètres sociaux, utiliser le même 
 
 - Ne pas présenter l’aperçu social comme une nouvelle fonctionnalité centrale.
 - Ne pas garantir que toutes les messageries affichent immédiatement l’image : certaines conservent les anciens aperçus en cache.
-- Ne pas annoncer la modification comme publiée tant que les balises de production ne sont pas vérifiées.
+- Ne pas promettre un affichage identique dans toutes les messageries, qui peuvent appliquer leur propre recadrage.
 
-## URL publique à vérifier après déploiement
+## URL publique vérifiée
 
 `https://bima-app-sigma.vercel.app/`
 
