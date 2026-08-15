@@ -17,6 +17,40 @@ function clientIp(request: Request) {
   return (forwarded || request.headers.get("x-real-ip") || "").slice(0, 128);
 }
 
+export function bimaProxyRequestHeaders(request: Request) {
+  const headers = new Headers();
+
+  for (const name of ["accept", "authorization", "content-type"]) {
+    const value = request.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+
+  const proxySecret = process.env.NOTIFICATION_SECRET?.trim();
+  const requesterIp = clientIp(request);
+  if (proxySecret && requesterIp) {
+    headers.set("x-bima-proxy-secret", proxySecret);
+    headers.set("x-bima-client-ip", requesterIp);
+  }
+
+  return headers;
+}
+
+export function bimaUpstreamResponseHeaders(upstream: Response) {
+  const headers = new Headers(bimaResponseHeaders);
+  for (const name of [
+    "content-type",
+    "content-disposition",
+    "retry-after",
+    "x-ratelimit-limit",
+    "x-ratelimit-remaining",
+  ]) {
+    const value = upstream.headers.get(name);
+    if (value) headers.set(name, value);
+  }
+
+  return headers;
+}
+
 export function bimaBackendUrl(path: string) {
   const baseUrl = (process.env.BIMA_API_URL || DEFAULT_BIMA_API_URL).replace(/\/$/, "");
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
@@ -34,19 +68,7 @@ export async function proxyBima(
   try {
     const requestUrl = new URL(request.url);
     const search = options.forwardSearch ? requestUrl.search : "";
-    const headers = new Headers();
-
-    for (const name of ["accept", "authorization", "content-type"]) {
-      const value = request.headers.get(name);
-      if (value) headers.set(name, value);
-    }
-
-    const proxySecret = process.env.NOTIFICATION_SECRET?.trim();
-    const requesterIp = clientIp(request);
-    if (proxySecret && requesterIp) {
-      headers.set("x-bima-proxy-secret", proxySecret);
-      headers.set("x-bima-client-ip", requesterIp);
-    }
+    const headers = bimaProxyRequestHeaders(request);
 
     const method = request.method.toUpperCase();
     const body = method === "GET" || method === "HEAD" ? undefined : await request.arrayBuffer();
@@ -57,17 +79,7 @@ export async function proxyBima(
       cache: "no-store",
     });
 
-    const outgoingHeaders = new Headers(bimaResponseHeaders);
-    for (const name of [
-      "content-type",
-      "content-disposition",
-      "retry-after",
-      "x-ratelimit-limit",
-      "x-ratelimit-remaining",
-    ]) {
-      const value = upstream.headers.get(name);
-      if (value) outgoingHeaders.set(name, value);
-    }
+    const outgoingHeaders = bimaUpstreamResponseHeaders(upstream);
 
     return new Response(upstream.body, {
       status: upstream.status,

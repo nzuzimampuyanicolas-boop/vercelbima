@@ -261,10 +261,11 @@ test("publishes crawl rules, a focused sitemap, and route-specific metadata", as
 });
 
 test("rate limits public API abuse without storing client IP addresses in clear text", async () => {
-  const [migration, edgeApi, proxy, envExample, readme] = await Promise.all([
+  const [migration, edgeApi, proxy, createRoute, envExample, readme] = await Promise.all([
     source("supabase/migrations/20260815181616_add_api_rate_limits.sql"),
     source("supabase/functions/bima-api/index.ts"),
     source("app/api/_shared.ts"),
+    source("app/api/events/route.ts"),
     source(".env.example"),
     source("README.md"),
   ]);
@@ -279,14 +280,30 @@ test("rate limits public API abuse without storing client IP addresses in clear 
   assert.match(edgeApi, /db\.rpc\("bima_consume_rate_limit"/);
   assert.match(edgeApi, /code: "rate_limit_exceeded"/);
   assert.match(edgeApi, /"Retry-After": String\(result\.retry_after\)/);
-  assert.match(edgeApi, /createEvent: \{ scope: "event-create", limit: 5, windowSeconds: 3600 \}/);
+  assert.match(edgeApi, /createAttempt: \{ scope: "event-create-attempt", limit: 20, windowSeconds: 3600 \}/);
+  assert.match(edgeApi, /createAttemptDaily: \{ scope: "event-create-attempt-daily", limit: 50, windowSeconds: 86400 \}/);
+  assert.match(edgeApi, /createSuccess: \{ scope: "event-create-success", limit: 5, windowSeconds: 3600 \}/);
+  assert.match(edgeApi, /createSuccessDaily: \{ scope: "event-create-success-daily", limit: 10, windowSeconds: 86400 \}/);
   assert.match(edgeApi, /rateLimitPolicies\.placePreview/);
-  assert.match(edgeApi, /rateLimitPolicies\.vote/);
-  assert.match(edgeApi, /rateLimitPolicies\.admin/);
+  assert.match(edgeApi, /placePreviewDaily: \{ scope: "place-preview-daily", limit: 50, windowSeconds: 86400 \}/);
+  assert.match(edgeApi, /voteNetwork: \{ scope: "event-vote-network", limit: 100, windowSeconds: 600 \}/);
+  assert.match(edgeApi, /voteParticipant: \{ scope: "event-vote-participant", limit: 10, windowSeconds: 600 \}/);
+  assert.match(edgeApi, /organizerInvalid: \{ scope: "organizer-invalid", limit: 5, windowSeconds: 900 \}/);
+  assert.match(edgeApi, /adminRead: \{ scope: "admin-read", limit: 90, windowSeconds: 900 \}/);
+  assert.match(edgeApi, /adminDelete: \{ scope: "admin-delete", limit: 30, windowSeconds: 900 \}/);
+  assert.match(edgeApi, /adminInvalid: \{ scope: "admin-invalid", limit: 5, windowSeconds: 900 \}/);
+  assert.match(edgeApi, /notificationInvalid: \{ scope: "notification-invalid", limit: 5, windowSeconds: 900 \}/);
+  assert.match(edgeApi, /async function organizerRateLimited/);
+  assert.match(edgeApi, /async function voteRateLimited/);
+  assert.match(edgeApi, /async function adminRateLimited/);
+  assert.match(edgeApi, /event: "rate_limit_exceeded"/);
+  assert.match(edgeApi, /Réessaie dans \$\{retryLabel\}/);
   assert.doesNotMatch(migration, /client_ip|ip_address/i);
   assert.match(proxy, /process\.env\.NOTIFICATION_SECRET/);
   assert.match(proxy, /headers\.set\("x-bima-client-ip", requesterIp\)/);
   assert.match(proxy, /"retry-after"/);
+  assert.match(createRoute, /bimaProxyRequestHeaders\(request\)/);
+  assert.match(createRoute, /bimaUpstreamResponseHeaders\(upstream\)/);
   assert.doesNotMatch(envExample, /BIMA_PROXY_SECRET=/);
   assert.match(readme, /NOTIFICATION_SECRET/);
 });

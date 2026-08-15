@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { sendManagementEmail } from "@/app/lib/gmail";
-import { apiOptions, bimaBackendUrl, bimaResponseHeaders } from "../_shared";
+import {
+  apiOptions,
+  bimaBackendUrl,
+  bimaProxyRequestHeaders,
+  bimaResponseHeaders,
+  bimaUpstreamResponseHeaders,
+} from "../_shared";
 
 export const preferredRegion = "lhr1";
 
@@ -18,7 +24,7 @@ export async function POST(request: Request) {
     };
     const upstream = await fetch(bimaBackendUrl("/api/events"), {
       method: "POST",
-      headers: { "content-type": "application/json", accept: "application/json" },
+      headers: bimaProxyRequestHeaders(request),
       body: bodyText,
       cache: "no-store",
     });
@@ -27,7 +33,7 @@ export async function POST(request: Request) {
     if (!upstream.ok || !payload) {
       return NextResponse.json(
         payload || { error: "Le service BIMA est momentanément indisponible." },
-        { status: upstream.status || 502, headers: bimaResponseHeaders },
+        { status: upstream.status || 502, headers: bimaUpstreamResponseHeaders(upstream) },
       );
     }
 
@@ -47,7 +53,7 @@ export async function POST(request: Request) {
         emailSent: emailResult.sent,
         emailWarning: emailResult.warning,
       },
-      { status: 201, headers: bimaResponseHeaders },
+      { status: 201, headers: bimaUpstreamResponseHeaders(upstream) },
     );
   } catch (error) {
     console.error("BIMA event creation failed", error);

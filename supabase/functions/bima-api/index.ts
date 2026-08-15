@@ -51,13 +51,23 @@ type RateLimitRow = {
 
 const rateLimitPolicies = {
   placePreview: { scope: "place-preview", limit: 20, windowSeconds: 600 },
-  createEvent: { scope: "event-create", limit: 5, windowSeconds: 3600 },
+  placePreviewDaily: { scope: "place-preview-daily", limit: 50, windowSeconds: 86400 },
+  createAttempt: { scope: "event-create-attempt", limit: 20, windowSeconds: 3600 },
+  createAttemptDaily: { scope: "event-create-attempt-daily", limit: 50, windowSeconds: 86400 },
+  createSuccess: { scope: "event-create-success", limit: 5, windowSeconds: 3600 },
+  createSuccessDaily: { scope: "event-create-success-daily", limit: 10, windowSeconds: 86400 },
   eventRead: { scope: "event-read", limit: 120, windowSeconds: 60 },
   shortLinkRead: { scope: "short-link-read", limit: 120, windowSeconds: 60 },
-  vote: { scope: "event-vote", limit: 40, windowSeconds: 600 },
+  voteNetwork: { scope: "event-vote-network", limit: 100, windowSeconds: 600 },
+  voteParticipant: { scope: "event-vote-participant", limit: 10, windowSeconds: 600 },
   organizerMutation: { scope: "organizer-mutation", limit: 30, windowSeconds: 600 },
+  organizerInvalid: { scope: "organizer-invalid", limit: 5, windowSeconds: 900 },
   calendar: { scope: "calendar", limit: 30, windowSeconds: 600 },
-  admin: { scope: "admin", limit: 20, windowSeconds: 900 },
+  adminRead: { scope: "admin-read", limit: 90, windowSeconds: 900 },
+  adminDelete: { scope: "admin-delete", limit: 30, windowSeconds: 900 },
+  adminInvalid: { scope: "admin-invalid", limit: 5, windowSeconds: 900 },
+  notificationValid: { scope: "notification-valid", limit: 60, windowSeconds: 900 },
+  notificationInvalid: { scope: "notification-invalid", limit: 5, windowSeconds: 900 },
 } as const
 
 function constantTimeEqual(left: string, right: string) {
@@ -123,26 +133,18 @@ async function consumeRateLimit(request: Request, policy: RateLimitPolicy) {
   return result
 }
 
-async function rateLimited(
-  request: Request,
-  policy: RateLimitPolicy,
-  operation: () => Promise<Response>,
-) {
-  const result = await consumeRateLimit(request, policy)
-  if (result.allowed) {
-    const response = await operation()
-    const headers = new Headers(response.headers)
-    headers.set("X-RateLimit-Limit", String(policy.limit))
-    headers.set("X-RateLimit-Remaining", String(result.remaining))
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    })
-  }
+function rateLimitResponse(result: RateLimitRow, policy: RateLimitPolicy) {
+  const retryLabel = result.retry_after >= 60
+    ? `${Math.ceil(result.retry_after / 60)} min`
+    : `${result.retry_after} s`
+  console.info(JSON.stringify({
+    event: "rate_limit_exceeded",
+    scope: policy.scope,
+    retryAfter: result.retry_after,
+  }))
   return json(
     {
-      error: "Trop de demandes depuis cette connexion. Patiente un moment puis réessaie.",
+      error: `Trop de demandes depuis cette connexion. Réessaie dans ${retryLabel}.`,
       code: "rate_limit_exceeded",
       retryAfter: result.retry_after,
     },
@@ -153,6 +155,26 @@ async function rateLimited(
       "X-RateLimit-Remaining": String(result.remaining),
     },
   )
+}
+
+async function rateLimited(
+  request: Request,
+  policy: RateLimitPolicy,
+  operation: () => Promise<Response>,
+) {
+  const result = await consumeRateLimit(request, policy)
+  if (result.allowed) {
+    const response = await operation()
+    const headers = new Headers(response.headers)
+    if (!headers.has("X-RateLimit-Limit")) headers.set("X-RateLimit-Limit", String(policy.limit))
+    if (!headers.has("X-RateLimit-Remaining")) headers.set("X-RateLimit-Remaining", String(result.remaining))
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    })
+  }
+  return rateLimitResponse(result, policy)
 }
 
 function makeToken() {
@@ -466,6 +488,14 @@ async function createEvent(request: Request) {
       image: cleanText(place.image, 2000) || null,
     }
   })
+
+  const creationDiscriminator = await sha256(organizerEmail)
+  const hourlyCreationPolicy = { ...rateLimitPolicies.createSuccess, discriminator: creationDiscriminator }
+  const hourlyCreationLimit = await consumeRateLimit(request, hourlyCreationPolicy)
+  if (!hourlyCreationLimit.allowed) return rateLimitResponse(hourlyCreationLimit, hourlyCreationPolicy)
+  const dailyCreationPolicy = { ...rateLimitPolicies.createSuccessDaily, discriminator: creationDiscriminator }
+  const dailyCreationLimit = await consumeRateLimit(request, dailyCreationPolicy)
+  if (!dailyCreationLimit.allowed) return rateLimitResponse(dailyCreationLimit, dailyCreationPolicy)
 
   const eventId = crypto.randomUUID()
   const slug = makeSlug(title)
@@ -840,8 +870,9 @@ async function claimNotificationJobs(eventId?: string) {
   return claimed
 }
 
-async function processNotifications(request: Request) {
-  if (!await hasNotificationAccess(request)) return json({ error: "Accès refusé." }, 401)
+async function processNotifications(request: Request, authorization?: boolean) {
+  const authorized = authorization ?? await hasNotificationAccess(request)
+  if (!authorized) return json({ error: "Accès refusé." }, 401)
   const body = await request.json().catch(() => ({}))
   const slug = cleanText(body.slug, 100)
   const referenceDate = /^\d{4}-\d{2}-\d{2}$/.test(body.referenceDate || "") ? body.referenceDate : new Date().toISOString().slice(0, 10)
@@ -891,8 +922,9 @@ async function processNotifications(request: Request) {
   return json({ jobs })
 }
 
-async function completeNotifications(request: Request) {
-  if (!await hasNotificationAccess(request)) return json({ error: "Accès refusé." }, 401)
+async function completeNotifications(request: Request, authorization?: boolean) {
+  const authorized = authorization ?? await hasNotificationAccess(request)
+  if (!authorized) return json({ error: "Accès refusé." }, 401)
   const body = await request.json().catch(() => ({}))
   const results = Array.isArray(body.results) ? body.results.slice(0, 50) : []
   for (const result of results) {
@@ -954,16 +986,26 @@ async function calendar(slug: string) {
   })
 }
 
+let adminTokenHashCache: { value: string; expiresAt: number } | null = null
+
+async function adminTokenHash() {
+  if (adminTokenHashCache && adminTokenHashCache.expiresAt > Date.now()) return adminTokenHashCache.value
+  const { data, error } = await db.from("bima_config").select("value").eq("key", "admin_token_sha256").maybeSingle()
+  assertDatabase(error, "Impossible de vérifier l’accès administrateur.")
+  const value = cleanText(data?.value, 128)
+  adminTokenHashCache = { value, expiresAt: Date.now() + 60_000 }
+  return value
+}
+
 async function isAdmin(request: Request) {
   const supplied = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "").trim()
   if (!supplied) return false
-  const { data, error } = await db.from("bima_config").select("value").eq("key", "admin_token_sha256").maybeSingle()
-  assertDatabase(error, "Impossible de vérifier l’accès administrateur.")
-  return Boolean(data?.value && data.value === await sha256(supplied))
+  return constantTimeEqual(await sha256(supplied), await adminTokenHash())
 }
 
-async function adminData(request: Request) {
-  if (!await isAdmin(request)) return json({ error: "Clé administrateur invalide." }, 401)
+async function adminData(request: Request, authorization?: boolean) {
+  const authorized = authorization ?? await isAdmin(request)
+  if (!authorized) return json({ error: "Clé administrateur invalide." }, 401)
   const [eventsResult, placesResult, datesResult, participantsResult, votesResult, stageVotesResult] = await Promise.all([
     db.from("bima_events").select("id,slug,title,organizer_name,organizer_email,city,max_places,budget_eur,response_deadline,confirmed_date_id,event_type,created_at,updated_at").order("created_at", { ascending: false }).limit(500),
     db.from("bima_places").select("id,event_id,position,start_time,name,address,category,maps_url").order("position").limit(1000),
@@ -1014,8 +1056,9 @@ async function adminData(request: Request) {
 type AdminSection = "events" | "places" | "participants" | "votes" | "stageVotes" | "dates"
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
-async function adminDelete(request: Request) {
-  if (!await isAdmin(request)) return json({ error: "Clé administrateur invalide." }, 401)
+async function adminDelete(request: Request, authorization?: boolean) {
+  const authorized = authorization ?? await isAdmin(request)
+  if (!authorized) return json({ error: "Clé administrateur invalide." }, 401)
   const body = await request.json().catch(() => null) as { section?: AdminSection; id?: string; participantId?: string; relatedId?: string } | null
   const section = body?.section
   if (!section || !["events", "places", "participants", "votes", "stageVotes", "dates"].includes(section)) {
@@ -1167,6 +1210,65 @@ async function resolvePlace(request: Request) {
   })
 }
 
+async function organizerRateLimited(
+  request: Request,
+  slug: string,
+  operation: () => Promise<Response>,
+) {
+  const body = await request.clone().json().catch(() => ({}))
+  const event = await findEvent(slug)
+  const authorized = Boolean(event) && await hasManageAccess(
+    event,
+    cleanText(body.manageToken, 128),
+    cleanText(body.manageShortCode, 64),
+  )
+  const policy = authorized
+    ? { ...rateLimitPolicies.organizerMutation, discriminator: slug }
+    : { ...rateLimitPolicies.organizerInvalid, discriminator: slug }
+  return await rateLimited(request, policy, operation)
+}
+
+async function voteRateLimited(
+  request: Request,
+  slug: string,
+  operation: () => Promise<Response>,
+) {
+  const body = await request.clone().json().catch(() => ({}))
+  const personalCredential = cleanText(
+    body.participantToken || body.participantShortCode || body.manageShortCode,
+    128,
+  )
+  const networkPolicy = { ...rateLimitPolicies.voteNetwork, discriminator: slug }
+  return await rateLimited(request, networkPolicy, async () => {
+    if (!personalCredential) return await operation()
+    const participantKey = await sha256(`${slug}:${personalCredential}`)
+    return await rateLimited(
+      request,
+      { ...rateLimitPolicies.voteParticipant, discriminator: participantKey },
+      operation,
+    )
+  })
+}
+
+async function adminRateLimited(
+  request: Request,
+  validPolicy: RateLimitPolicy,
+  operation: (authorized: boolean) => Promise<Response>,
+) {
+  const authorized = await isAdmin(request)
+  const policy = authorized ? validPolicy : rateLimitPolicies.adminInvalid
+  return await rateLimited(request, policy, () => operation(authorized))
+}
+
+async function notificationRateLimited(
+  request: Request,
+  operation: (authorized: boolean) => Promise<Response>,
+) {
+  const authorized = await hasNotificationAccess(request)
+  const policy = authorized ? rateLimitPolicies.notificationValid : rateLimitPolicies.notificationInvalid
+  return await rateLimited(request, policy, () => operation(authorized))
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders })
   try {
@@ -1176,18 +1278,34 @@ Deno.serve(async (request: Request) => {
     const route = markerIndex >= 0 ? url.pathname.slice(markerIndex + marker.length) || "/" : url.pathname
     if (request.method === "GET" && route === "/health") return json({ ok: true, service: "bima-api" })
     if (request.method === "POST" && route === "/api/places") {
-      return await rateLimited(request, rateLimitPolicies.placePreview, () => resolvePlace(request))
+      return await rateLimited(request, rateLimitPolicies.placePreviewDaily, () => (
+        rateLimited(request, rateLimitPolicies.placePreview, () => resolvePlace(request))
+      ))
     }
     if (request.method === "POST" && route === "/api/events") {
-      return await rateLimited(request, rateLimitPolicies.createEvent, () => createEvent(request))
+      return await rateLimited(request, rateLimitPolicies.createAttemptDaily, () => (
+        rateLimited(request, rateLimitPolicies.createAttempt, () => createEvent(request))
+      ))
     }
-    if (request.method === "POST" && route === "/api/notifications/process") return await processNotifications(request)
-    if (request.method === "POST" && route === "/api/notifications/complete") return await completeNotifications(request)
+    if (request.method === "POST" && route === "/api/notifications/process") {
+      return await notificationRateLimited(request, (authorized) => processNotifications(request, authorized))
+    }
+    if (request.method === "POST" && route === "/api/notifications/complete") {
+      return await notificationRateLimited(request, (authorized) => completeNotifications(request, authorized))
+    }
     if (request.method === "GET" && route === "/api/admin/data") {
-      return await rateLimited(request, rateLimitPolicies.admin, () => adminData(request))
+      return await adminRateLimited(
+        request,
+        rateLimitPolicies.adminRead,
+        (authorized) => adminData(request, authorized),
+      )
     }
     if (request.method === "POST" && route === "/api/admin/delete") {
-      return await rateLimited(request, rateLimitPolicies.admin, () => adminDelete(request))
+      return await adminRateLimited(
+        request,
+        rateLimitPolicies.adminDelete,
+        (authorized) => adminDelete(request, authorized),
+      )
     }
     const shortMatch = route.match(/^\/api\/short\/(manage|participant)\/([^/]+)$/)
     if (request.method === "GET" && shortMatch) {
@@ -1198,9 +1316,9 @@ Deno.serve(async (request: Request) => {
     const participantDeleteMatch = route.match(/^\/api\/events\/([^/]+)\/participants\/([^/]+)\/delete$/)
     if (request.method === "POST" && participantDeleteMatch) {
       const slug = decodeURIComponent(participantDeleteMatch[1])
-      return await rateLimited(
+      return await organizerRateLimited(
         request,
-        { ...rateLimitPolicies.organizerMutation, discriminator: slug },
+        slug,
         () => deleteParticipant(
           request,
           slug,
@@ -1224,37 +1342,37 @@ Deno.serve(async (request: Request) => {
         ))
       }
       if (request.method === "PATCH" && !action) {
-        return await rateLimited(
+        return await organizerRateLimited(
           request,
-          { ...rateLimitPolicies.organizerMutation, discriminator: slug },
+          slug,
           () => updateEvent(request, slug),
         )
       }
       if (request.method === "POST" && action === "votes") {
-        return await rateLimited(
+        return await voteRateLimited(
           request,
-          { ...rateLimitPolicies.vote, discriminator: slug },
+          slug,
           () => submitVote(request, slug),
         )
       }
       if (request.method === "POST" && action === "notifications") {
-        return await rateLimited(
+        return await organizerRateLimited(
           request,
-          { ...rateLimitPolicies.organizerMutation, discriminator: slug },
+          slug,
           () => updateNotificationPreferences(request, slug),
         )
       }
       if (request.method === "POST" && action === "confirm") {
-        return await rateLimited(
+        return await organizerRateLimited(
           request,
-          { ...rateLimitPolicies.organizerMutation, discriminator: slug },
+          slug,
           () => confirmDate(request, slug),
         )
       }
       if (request.method === "POST" && action === "delete") {
-        return await rateLimited(
+        return await organizerRateLimited(
           request,
-          { ...rateLimitPolicies.organizerMutation, discriminator: slug },
+          slug,
           () => deleteEvent(request, slug),
         )
       }

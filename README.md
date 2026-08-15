@@ -50,9 +50,17 @@ La table `bima_notification_deliveries` ne stocke pas l’adresse e-mail : elle 
 
 ## Protection anti-abus
 
-Toutes les interfaces passent par la même limitation dans l’Edge Function Supabase. Les compteurs Postgres sont incrémentés atomiquement et regroupés par type d’action. Les créations sont limitées à 5 par heure et par connexion ; les aperçus de lieux, votes, lectures et actions privées utilisent des seuils adaptés à leur coût et à leur usage normal.
+Toutes les interfaces passent par la même limitation dans l’Edge Function Supabase. Les compteurs Postgres sont incrémentés atomiquement et regroupés par type d’action. Le recalibrage distingue les tentatives des actions valides et évite qu’un réseau partagé bloque trop vite un groupe :
 
-L’identité réseau est hachée avec un secret serveur avant la création du compteur. Une empreinte technique minimale est utilisée uniquement lorsque l’adresse réseau est indisponible. Aucune adresse IP n’est conservée en clair. Les compteurs expirés sont supprimés automatiquement. Une requête refusée reçoit le statut HTTP `429`, un message compréhensible et l’en-tête `Retry-After`.
+- lieux : 20 tentatives par 10 minutes et 50 par jour ;
+- création : 20 tentatives par heure et 50 par jour, puis 5 formulaires valides par heure et 10 par jour pour une même connexion et un même e-mail ;
+- votes : 100 par 10 minutes pour le réseau et la sortie, avec 10 modifications par lien personnel ;
+- organisateur : 30 actions valides par 10 minutes, contre 5 liens invalides par 15 minutes ;
+- administration : 90 lectures et 30 suppressions par 15 minutes avec une clé valide, contre 5 essais avec une clé invalide ;
+- calendrier : 30 téléchargements par 10 minutes ;
+- lectures et liens courts : 120 par minute.
+
+L’identité réseau est hachée avec un secret serveur avant la création du compteur. Une empreinte technique minimale est utilisée uniquement lorsque l’adresse réseau est indisponible. Aucune adresse IP n’est conservée en clair. Les compteurs expirés sont supprimés automatiquement. Une requête refusée reçoit le statut HTTP `429`, un compte à rebours compréhensible et l’en-tête `Retry-After`. Seuls le type de limite et le délai sont journalisés, jamais l’identité ou son empreinte.
 
 ## Modèle temporel
 
