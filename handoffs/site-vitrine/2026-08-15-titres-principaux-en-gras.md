@@ -4,7 +4,7 @@ Date : 15 août 2026
 
 ## Statut
 
-Les titres principaux de l’accueil et de la page 404 de l’application BIMA utilisent désormais une graisse `800`, identique à celle déjà appliquée au mot « groupe. ».
+Les titres principaux de l’accueil et de la page 404 de l’application BIMA utilisent désormais une graisse `800`, identique à celle déjà appliquée au mot « groupe. ». Le changement est publié et vérifié sur le site public.
 
 ## Changements terminés
 
@@ -31,7 +31,7 @@ Si la page 404 Framer reprend « On s’est perdus en chemin. », appliquer éga
 
 Ne pas présenter cette modification comme une nouvelle fonctionnalité produit.
 
-## URL publique à vérifier après déploiement
+## URL publique vérifiée
 
 - `https://bima-app-sigma.vercel.app/`
 - `https://bima-app-sigma.vercel.app/une-page-qui-nexiste-pas`
