@@ -278,7 +278,7 @@ export function BimaApp({ initialEventSlug = "", initialManageShortCode = "", in
       setManageToken("");
       setParticipantToken("");
       setError("");
-      setMode("home");
+      setMode(window.location.pathname === "/creer" ? "create" : "home");
       setInitializing(false);
       return;
     }
@@ -316,7 +316,7 @@ export function BimaApp({ initialEventSlug = "", initialManageShortCode = "", in
   };
 
   const goCreate = () => {
-    window.history.pushState({}, "", "/");
+    window.history.pushState({}, "", "/creer");
     setError("");
     setMode("create");
   };

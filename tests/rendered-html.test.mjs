@@ -307,3 +307,16 @@ test("rate limits public API abuse without storing client IP addresses in clear 
   assert.doesNotMatch(envExample, /BIMA_PROXY_SECRET=/);
   assert.match(readme, /NOTIFICATION_SECRET/);
 });
+
+test("opens the creation flow from a stable landing-page CTA URL", async () => {
+  const [app, createPage] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/creer/page.tsx"),
+  ]);
+
+  assert.match(app, /window\.location\.pathname === "\/creer" \? "create" : "home"/);
+  assert.match(app, /window\.history\.pushState\(\{\}, "", "\/creer"\)/);
+  assert.match(createPage, /return <BimaApp \/>/);
+  assert.match(createPage, /path: "\/creer"/);
+  assert.match(createPage, /index: false/);
+});
