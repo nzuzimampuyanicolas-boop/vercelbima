@@ -4,7 +4,7 @@ Date : 15 août 2026
 
 ## Statut
 
-La configuration SEO de l’application BIMA a été structurée et vérifiée localement. La publication doit être confirmée sur Vercel avant d’annoncer le changement comme disponible.
+La configuration SEO de l’application BIMA est publiée et vérifiée sur Vercel. Les fichiers `robots.txt` et `sitemap.xml`, les URL canoniques, les métadonnées sociales et les directives `noindex` des routes privées ont été contrôlés sur le site public.
 
 ## Changements terminés et vérifiés
 
@@ -49,7 +49,7 @@ Si la vitrine dispose de son propre `robots.txt` ou `sitemap.xml`, elle doit con
 - Ne pas promettre que les invitations ou liens privés apparaîtront dans Google : ils sont volontairement exclus de l’indexation.
 - Ne pas annoncer une optimisation complète du référencement tant que la vitrine et son futur domaine définitif n’ont pas été audités séparément.
 
-## URLs publiques à vérifier après déploiement
+## URLs publiques vérifiées
 
 - `https://bima-app-sigma.vercel.app/robots.txt`
 - `https://bima-app-sigma.vercel.app/sitemap.xml`
