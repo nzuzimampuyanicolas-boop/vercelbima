@@ -4,7 +4,7 @@ Date : 15 août 2026
 
 ## Statut
 
-La page 404 personnalisée de l’application BIMA a été créée et vérifiée localement. Elle n’est pas encore publiée sur l’URL publique Vercel.
+La page 404 personnalisée de l’application BIMA est publiée et vérifiée sur l’URL publique Vercel.
 
 ## Changements terminés et vérifiés
 
@@ -30,7 +30,7 @@ Aucun nouveau bénéfice produit. Cette modification renforce seulement la cohé
 
 Aucune nouvelle section ni nouveau texte commercial ne sont nécessaires.
 
-Après publication de l’application, vérifier simplement que les liens erronés de la vitrine qui pointent vers BIMA affichent bien cette nouvelle page plutôt qu’une erreur générique.
+Vérifier simplement que les liens erronés de la vitrine qui pointent vers BIMA affichent bien cette nouvelle page plutôt qu’une erreur générique.
 
 ## Suggestion facultative
 
@@ -39,9 +39,9 @@ La vitrine Framer possède déjà une proposition de page 404 au message proche.
 ## À ne pas annoncer
 
 - Ne pas présenter la page 404 comme une nouvelle fonctionnalité BIMA.
-- Ne pas annoncer sa disponibilité publique tant que la nouvelle version Vercel n’a pas été déployée et testée.
+- Ne pas transformer cette finition technique en argument commercial principal.
 
-## URL publique à tester après déploiement
+## URL publique vérifiée
 
 `https://bima-app-sigma.vercel.app/une-page-qui-nexiste-pas`
 
