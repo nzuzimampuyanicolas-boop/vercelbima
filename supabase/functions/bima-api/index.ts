@@ -68,6 +68,9 @@ const rateLimitPolicies = {
   adminInvalid: { scope: "admin-invalid", limit: 5, windowSeconds: 900 },
   notificationValid: { scope: "notification-valid", limit: 60, windowSeconds: 900 },
   notificationInvalid: { scope: "notification-invalid", limit: 5, windowSeconds: 900 },
+  recoveryNetwork: { scope: "management-recovery-network", limit: 5, windowSeconds: 900 },
+  recoveryEmail: { scope: "management-recovery-email", limit: 3, windowSeconds: 3600 },
+  recoveryEmailDaily: { scope: "management-recovery-email-daily", limit: 5, windowSeconds: 86400 },
 } as const
 
 function constantTimeEqual(left: string, right: string) {
@@ -119,8 +122,9 @@ async function requestIdentity(request: Request) {
   return clientIp ? `ip:${clientIp}` : `fingerprint:${fallbackFingerprint || "unknown"}`
 }
 
-async function consumeRateLimit(request: Request, policy: RateLimitPolicy) {
-  const identityHash = await sha256(`${serviceRoleKey}:${await requestIdentity(request)}`)
+async function consumeRateLimit(request: Request, policy: RateLimitPolicy, identityOverride?: string) {
+  const identity = identityOverride || await requestIdentity(request)
+  const identityHash = await sha256(`${serviceRoleKey}:${identity}`)
   const bucket = await sha256(`${policy.scope}:${policy.discriminator || "global"}:${identityHash}`)
   const { data, error } = await db.rpc("bima_consume_rate_limit", {
     p_bucket: bucket,
@@ -942,6 +946,58 @@ async function completeNotifications(request: Request, authorization?: boolean) 
   return json({ ok: true, processed: results.length })
 }
 
+async function recoverManagementLinks(request: Request, authorization?: boolean) {
+  const authorized = authorization ?? await hasNotificationAccess(request)
+  if (!authorized) return json({ error: "Accès refusé." }, 401)
+
+  const body = await request.json().catch(() => ({}))
+  const email = cleanText(body.email, 254).toLowerCase()
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return json({ error: "Ajoute une adresse e-mail valide." }, 400)
+  }
+
+  const networkLimit = await consumeRateLimit(request, rateLimitPolicies.recoveryNetwork)
+  if (!networkLimit.allowed) return rateLimitResponse(networkLimit, rateLimitPolicies.recoveryNetwork)
+  const emailIdentity = `email:${email}`
+  const hourlyLimit = await consumeRateLimit(request, rateLimitPolicies.recoveryEmail, emailIdentity)
+  if (!hourlyLimit.allowed) return rateLimitResponse(hourlyLimit, rateLimitPolicies.recoveryEmail)
+  const dailyLimit = await consumeRateLimit(request, rateLimitPolicies.recoveryEmailDaily, emailIdentity)
+  if (!dailyLimit.allowed) return rateLimitResponse(dailyLimit, rateLimitPolicies.recoveryEmailDaily)
+
+  const { data: events, error } = await db
+    .from("bima_events")
+    .select("id,title,organizer_name,event_type,created_at")
+    .eq("organizer_email", email)
+    .order("created_at", { ascending: false })
+    .limit(10)
+  assertDatabase(error, "Impossible de rechercher les sorties.")
+  if (!events?.length) return json({ events: [] })
+
+  const eventIds = events.map((event) => event.id)
+  const { data: organizers, error: organizersError } = await db
+    .from("bima_participants")
+    .select("id,event_id")
+    .in("event_id", eventIds)
+    .eq("role", "organizer")
+  assertDatabase(organizersError, "Impossible de retrouver les organisateurs.")
+  const organizerByEvent = new Map((organizers || []).map((organizer) => [organizer.event_id, organizer.id]))
+
+  const recoveredEvents = []
+  for (const event of events) {
+    const organizerId = organizerByEvent.get(event.id)
+    if (!organizerId) continue
+    const manageShortCode = await createShortLink("manage", event.id, organizerId)
+    recoveredEvents.push({
+      title: event.title,
+      organizerName: event.organizer_name,
+      eventType: event.event_type === "stay" ? "stay" : "outing",
+      createdAt: event.created_at,
+      managePath: `/m/${encodeURIComponent(manageShortCode)}`,
+    })
+  }
+  return json({ events: recoveredEvents })
+}
+
 function escapeIcsText(value: string) {
   return value.replaceAll("\\", "\\\\").replaceAll("\r\n", "\\n").replaceAll("\n", "\\n").replaceAll(",", "\\,").replaceAll(";", "\\;")
 }
@@ -1025,6 +1081,12 @@ async function adminData(request: Request, authorization?: boolean) {
   const participantById = new Map(participants.map((participant) => [participant.id, participant]))
   const dateById = new Map(dates.map((date) => [date.id, date]))
   const placeById = new Map(places.map((place) => [place.id, place]))
+  const datesByEvent = new Map<string, typeof dates>()
+  for (const date of dates) {
+    const eventDates = datesByEvent.get(date.event_id) || []
+    eventDates.push(date)
+    datesByEvent.set(date.event_id, eventDates)
+  }
   const participantsPerEvent = new Map<string, number>()
   for (const participant of participants) participantsPerEvent.set(participant.event_id, (participantsPerEvent.get(participant.event_id) || 0) + 1)
   const availablePerDate = new Map<string, number>()
@@ -1036,7 +1098,33 @@ async function adminData(request: Request, authorization?: boolean) {
   return json({
     generatedAt: new Date().toISOString(),
     summary: { events: events.length, places: places.length, dates: dates.length, participants: participants.length, votes: votes.length, stageVotes: stageVotes.length },
-    events: events.map((event) => ({ ...event, participant_count: participantsPerEvent.get(event.id) || 0 })),
+    events: events.map((event) => {
+      const eventDates = datesByEvent.get(event.id) || []
+      const confirmedDate = event.confirmed_date_id ? dateById.get(event.confirmed_date_id) : null
+      const plannedDate = confirmedDate || [...eventDates].sort((left, right) => Date.parse(left.starts_at) - Date.parse(right.starts_at))[0] || null
+      const lastEventTimestamp = Math.max(...eventDates.map((date) => Date.parse(date.ends_at || date.starts_at)))
+      const status = event.confirmed_date_id
+        ? "confirmed"
+        : eventDates.length && Number.isFinite(lastEventTimestamp) && lastEventTimestamp < Date.now()
+          ? "abandoned"
+          : "collecting"
+      const feedbackTimestamp = confirmedDate ? Date.parse(confirmedDate.ends_at || confirmedDate.starts_at) : Number.NaN
+      const elapsedSinceEvent = Date.now() - feedbackTimestamp
+      const feedbackStatus = !Number.isFinite(feedbackTimestamp)
+        ? "none"
+        : elapsedSinceEvent < 0
+          ? "upcoming"
+          : elapsedSinceEvent >= 2 * 24 * 60 * 60 * 1000
+            ? "ready"
+            : "wait"
+      return {
+        ...event,
+        participant_count: participantsPerEvent.get(event.id) || 0,
+        status,
+        planned_date: plannedDate?.starts_at || null,
+        feedback_status: feedbackStatus,
+      }
+    }),
     places: places.map((place) => ({ ...place, event_title: eventById.get(place.event_id)?.title || "" })),
     dates: dates.map((date) => ({ ...date, event_title: eventById.get(date.event_id)?.title || "", confirmed: eventById.get(date.event_id)?.confirmed_date_id === date.id ? 1 : 0, available_count: availablePerDate.get(date.id) || 0, response_count: responsesPerDate.get(date.id) || 0 })),
     participants: participants.map((participant) => ({ ...participant, event_title: eventById.get(participant.event_id)?.title || "" })),
@@ -1292,6 +1380,9 @@ Deno.serve(async (request: Request) => {
     }
     if (request.method === "POST" && route === "/api/notifications/complete") {
       return await notificationRateLimited(request, (authorized) => completeNotifications(request, authorized))
+    }
+    if (request.method === "POST" && route === "/api/recovery/manage") {
+      return await notificationRateLimited(request, (authorized) => recoverManagementLinks(request, authorized))
     }
     if (request.method === "GET" && route === "/api/admin/data") {
       return await adminRateLimited(

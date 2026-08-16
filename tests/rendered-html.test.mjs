@@ -244,7 +244,7 @@ test("publishes crawl rules, a focused sitemap, and route-specific metadata", as
   assert.match(layout, /template: "%s \| BIMA"/);
   assert.match(layout, /alternates: \{ canonical: "\/" \}/);
   assert.match(seo, /max-image-preview/);
-  assert.match(robots, /disallow: \["\/admin", "\/api\/", "\/m\/", "\/p\/"\]/);
+  assert.match(robots, /disallow: \["\/admin", "\/api\/", "\/m\/", "\/p\/", "\/recuperer-mon-lien"\]/);
   assert.match(robots, /sitemap: `\$\{siteUrl\}\/sitemap\.xml`/);
   assert.match(sitemap, /`\$\{siteUrl\}\/confidentialite`/);
   assert.doesNotMatch(sitemap, /\/admin|\/api\/|\/m\/|\/p\/|\/e\//);
@@ -276,7 +276,8 @@ test("rate limits public API abuse without storing client IP addresses in clear 
   assert.match(migration, /security invoker/i);
   assert.match(migration, /revoke execute on function public\.bima_consume_rate_limit[\s\S]*from public, anon, authenticated/i);
   assert.match(migration, /grant execute on function public\.bima_consume_rate_limit[\s\S]*to service_role/i);
-  assert.match(edgeApi, /sha256\(`\$\{serviceRoleKey\}:\$\{await requestIdentity\(request\)\}`\)/);
+  assert.match(edgeApi, /const identity = identityOverride \|\| await requestIdentity\(request\)/);
+  assert.match(edgeApi, /sha256\(`\$\{serviceRoleKey\}:\$\{identity\}`\)/);
   assert.match(edgeApi, /db\.rpc\("bima_consume_rate_limit"/);
   assert.match(edgeApi, /code: "rate_limit_exceeded"/);
   assert.match(edgeApi, /"Retry-After": String\(result\.retry_after\)/);
@@ -319,4 +320,57 @@ test("opens the creation flow from a stable landing-page CTA URL", async () => {
   assert.match(createPage, /return <BimaApp \/>/);
   assert.match(createPage, /path: "\/creer"/);
   assert.match(createPage, /index: false/);
+});
+
+test("recovers organizer management links without adding email to the guest flow", async () => {
+  const [
+    app,
+    recoveryPage,
+    recoveryForm,
+    recoveryRoute,
+    gmail,
+    edgeApi,
+    migration,
+    admin,
+    privacy,
+    readme,
+  ] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/recuperer-mon-lien/page.tsx"),
+    source("app/recuperer-mon-lien/RecoveryForm.tsx"),
+    source("app/api/recover-management-link/route.ts"),
+    source("app/lib/gmail.ts"),
+    source("supabase/functions/bima-api/index.ts"),
+    source("supabase/migrations/20260816175035_add_organizer_email_recovery_index.sql"),
+    source("app/admin/page.tsx"),
+    source("app/confidentialite/page.tsx"),
+    source("README.md"),
+  ]);
+
+  assert.match(app, /Ton mail pour récupérer ton lien si tu le perds\. On pourra aussi te demander ce que t&apos;en as pensé — pas de spam, promis\./);
+  assert.match(app, /href="\/recuperer-mon-lien"/);
+  const guestFlow = app.slice(app.indexOf("function RespondPage"), app.indexOf("function SavedPage"));
+  assert.doesNotMatch(guestFlow, /type="email"|organizerEmail/);
+  assert.match(recoveryPage, /index: false/);
+  assert.match(recoveryPage, /<RecoveryForm \/>/);
+  assert.match(recoveryForm, /fetch\("\/api\/recover-management-link"/);
+  assert.match(recoveryForm, /BIMA ne dira jamais si cette adresse est enregistrée/);
+  assert.match(recoveryRoute, /process\.env\.NOTIFICATION_SECRET/);
+  assert.match(recoveryRoute, /bimaBackendUrl\("\/api\/recovery\/manage"\)/);
+  assert.match(recoveryRoute, /Si cette adresse correspond à une sortie BIMA/);
+  assert.match(recoveryRoute, /sendManagementRecoveryEmail/);
+  assert.match(gmail, /export async function sendManagementRecoveryEmail/);
+  assert.match(edgeApi, /async function recoverManagementLinks/);
+  assert.match(edgeApi, /createShortLink\("manage", event\.id, organizerId\)/);
+  assert.match(edgeApi, /recoveryNetwork: \{ scope: "management-recovery-network", limit: 5, windowSeconds: 900 \}/);
+  assert.match(edgeApi, /recoveryEmail: \{ scope: "management-recovery-email", limit: 3, windowSeconds: 3600 \}/);
+  assert.match(edgeApi, /consumeRateLimit\(request, rateLimitPolicies\.recoveryEmail, emailIdentity\)/);
+  assert.match(edgeApi, /notificationRateLimited\(request, \(authorized\) => recoverManagementLinks\(request, authorized\)\)/);
+  assert.match(migration, /idx_bima_events_organizer_email/);
+  assert.match(admin, /planned_date/);
+  assert.match(admin, /feedback_status/);
+  assert.match(admin, /Abandonnée/);
+  assert.match(privacy, /n’est pas demandée aux invités/);
+  assert.match(privacy, /liste de diffusion marketing sans un consentement supplémentaire explicite/);
+  assert.match(readme, /Les invités ne fournissent ni compte ni e-mail/);
 });

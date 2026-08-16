@@ -23,6 +23,8 @@ export default function PrivacyPage() {
       <p>Les personnes qui possèdent le lien invité voient les informations de la sortie et les totaux. Seule la personne qui possède le lien privé organisateur peut consulter le détail des réponses et confirmer une date.</p>
       <h2>Suppression</h2>
       <p>L’organisateur peut supprimer définitivement la sortie depuis sa page de gestion. Cette suppression efface également les participants et toutes leurs réponses.</p>
+      <h2>E-mail de l’organisateur</h2>
+      <p>L’adresse e-mail demandée lors de la création sert uniquement à envoyer ou récupérer le lien privé de gestion et, ponctuellement, à demander un retour sur l’utilisation de BIMA. Elle n’est pas demandée aux invités et n’est pas ajoutée à une liste de diffusion marketing sans un consentement supplémentaire explicite.</p>
       <h2>Liens personnels</h2>
       <p>Les liens organisateur et participant sont des accès privés. Ne les publiez pas sur un site ouvert et transmettez-les uniquement aux personnes concernées.</p>
       <Link className="primary share-link" href="/">Revenir à BIMA</Link>

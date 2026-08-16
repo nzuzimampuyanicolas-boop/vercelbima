@@ -27,7 +27,7 @@ type AdminData = {
 type Column = {
   key: string;
   label: string;
-  kind?: "date" | "status" | "boolean" | "link" | "email" | "role" | "eventType";
+  kind?: "date" | "status" | "feedback" | "boolean" | "link" | "email" | "role" | "eventType";
 };
 
 const sections: Array<{
@@ -70,7 +70,9 @@ const columns: Record<SectionKey, Column[]> = {
     { key: "max_places", label: "Places max." },
     { key: "budget_eur", label: "Budget" },
     { key: "response_deadline", label: "Date limite", kind: "date" },
-    { key: "confirmed_date_id", label: "Statut", kind: "status" },
+    { key: "status", label: "Statut", kind: "status" },
+    { key: "planned_date", label: "Date prévue", kind: "date" },
+    { key: "feedback_status", label: "Relance feedback", kind: "feedback" },
     { key: "created_at", label: "Créée le", kind: "date" },
     { key: "slug", label: "Identifiant" },
   ],
@@ -132,12 +134,18 @@ function Cell({ column, value }: { column: Column; value: unknown }) {
   if (column.kind === "date") return <>{formatDate(value)}</>;
   if (column.kind === "eventType") return <>{value === "stay" ? "Séjour" : "Sortie"}</>;
   if (column.kind === "status") {
-    const confirmed = Boolean(value);
+    const status = String(value || "collecting");
+    const label = status === "confirmed" ? "Confirmée" : status === "abandoned" ? "Abandonnée" : "En cours";
     return (
-      <span className={`badge ${confirmed ? "success" : "pending"}`}>
-        {confirmed ? "Confirmée" : "Votes en cours"}
+      <span className={`badge ${status === "confirmed" ? "success" : status === "abandoned" ? "abandoned" : "pending"}`}>
+        {label}
       </span>
     );
+  }
+  if (column.kind === "feedback") {
+    const status = String(value || "none");
+    const label = status === "ready" ? "Prête" : status === "wait" ? "Attendre 2 jours" : status === "upcoming" ? "À venir" : "—";
+    return <span className={`badge feedback-${status}`}>{label}</span>;
   }
   if (column.kind === "boolean") {
     const enabled = Number(value) === 1 || value === true;
@@ -480,6 +488,6 @@ body{background:var(--bima-bg);color:var(--bima-text)}
 .login-card{background:#fffdfa;border-color:var(--bima-line);box-shadow:0 28px 80px rgba(20,84,93,.13)}.lock-mark{background:var(--bima-nav)}.login-card>small,.topbar small{color:var(--bima-cta)}.login-card p,.privacy-note{color:var(--bima-muted)!important}.login-card input{border-color:var(--bima-line);background:var(--bima-paper)}.login-card input:focus{border-color:var(--bima-cta);box-shadow:0 0 0 3px rgba(217,95,59,.13)}.login-card button,.top-actions>button{background:var(--bima-cta)}
 .sidebar{background:var(--bima-nav-dark)}.sidebar .brand{display:flex;color:white}.sidebar nav button:hover,.sidebar nav button.active{background:var(--bima-nav)}.sidebar nav button.active>span{background:var(--bima-cta);border-color:var(--bima-accent)}.sidebar nav button.active em{background:var(--bima-yellow);color:var(--bima-text)}
 .search,.summary-grid article,.table-card{background:#fffdfa;border-color:var(--bima-line)}.summary-grid article:nth-child(2){border-top:3px solid var(--bima-nav)}.summary-grid article:nth-child(3){border-top:3px solid var(--bima-accent)}.summary-grid article:nth-child(4){border-top:3px solid var(--bima-yellow)}.summary-grid article:first-child{border-top:3px solid var(--bima-cta)}
-.summary-grid small,.summary-grid span,.table-heading p,.table-heading>span,.empty-state{color:var(--bima-muted)}th{background:var(--bima-paper);color:var(--bima-muted)}td{border-color:#ede1d6}tbody tr:hover{background:rgba(234,216,200,.25)}td a{color:var(--bima-cta)}.badge.success,.answer.yes{background:rgba(20,84,93,.12);color:var(--bima-nav)}.badge.pending{background:rgba(244,185,66,.25);color:#77530c}.answer.no{background:var(--bima-paper);color:var(--bima-muted)}.role{background:rgba(242,150,120,.18);color:#8c402a}.delete-row{border:1px solid rgba(217,95,59,.35);border-radius:999px;background:#fff0ed;color:#a93b25;padding:7px 11px;font:inherit;font-size:11px;font-weight:800;cursor:pointer}.delete-row:hover{background:#ffe3dc}.delete-row:disabled{opacity:.5;cursor:wait}.table-message{padding:11px 26px;border-bottom:1px solid var(--bima-line);font-size:12px;font-weight:700}.table-message.success{background:rgba(20,84,93,.08);color:var(--bima-nav)}.table-message.error{background:#fff0ed;color:#a93b25}
+.summary-grid small,.summary-grid span,.table-heading p,.table-heading>span,.empty-state{color:var(--bima-muted)}th{background:var(--bima-paper);color:var(--bima-muted)}td{border-color:#ede1d6}tbody tr:hover{background:rgba(234,216,200,.25)}td a{color:var(--bima-cta)}.badge.success,.answer.yes{background:rgba(20,84,93,.12);color:var(--bima-nav)}.badge.pending,.badge.feedback-upcoming{background:rgba(244,185,66,.25);color:#77530c}.badge.abandoned{background:#eee9e2;color:#77736c}.badge.feedback-ready{background:rgba(217,95,59,.14);color:#a33d25}.badge.feedback-wait{background:rgba(242,150,120,.17);color:#8c402a}.badge.feedback-none{background:transparent;color:var(--bima-muted)}.answer.no{background:var(--bima-paper);color:var(--bima-muted)}.role{background:rgba(242,150,120,.18);color:#8c402a}.delete-row{border:1px solid rgba(217,95,59,.35);border-radius:999px;background:#fff0ed;color:#a93b25;padding:7px 11px;font:inherit;font-size:11px;font-weight:800;cursor:pointer}.delete-row:hover{background:#ffe3dc}.delete-row:disabled{opacity:.5;cursor:wait}.table-message{padding:11px 26px;border-bottom:1px solid var(--bima-line);font-size:12px;font-weight:700}.table-message.success{background:rgba(20,84,93,.08);color:var(--bima-nav)}.table-message.error{background:#fff0ed;color:#a93b25}
 @media(max-width:1050px){.sidebar .brand span{display:none}.sidebar .brand img{width:42px;height:42px}}@media(max-width:720px){.sidebar .brand{display:inline-flex}.sidebar .brand span{display:inline}.sidebar .brand img{width:40px;height:40px}}
 `;

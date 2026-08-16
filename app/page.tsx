@@ -648,7 +648,7 @@ function HomeLanding({ onCreate }: { onCreate: () => void }) {
         <i>→</i><span>2</span><p><b>Ils répondent</b><br />depuis le lien partagé</p>
         <i>→</i><span>3</span><p><b>Tu confirmes</b><br />et télécharges le calendrier</p>
       </div>
-      <footer className="public-footer">BIMA · Les prénoms et réponses sont utilisés uniquement pour organiser la sortie. <a href="/confidentialite">Confidentialité</a></footer>
+      <footer className="public-footer">BIMA · Les prénoms et réponses sont utilisés uniquement pour organiser la sortie. <a href="/recuperer-mon-lien">J’ai perdu mon lien</a> · <a href="/confidentialite">Confidentialité</a></footer>
     </section>
   );
 }
@@ -769,7 +769,7 @@ function CreatePage({
             <button type="button" className={eventType === "stay" ? "selected" : ""} onClick={() => setEventType("stay")} aria-pressed={eventType === "stay"}><b>Un séjour</b><span>Du départ au retour</span></button>
           </fieldset>
           <label className="field"><span>Ton prénom</span><input value={organizerName} onChange={(event) => setOrganizerName(event.target.value)} maxLength={60} placeholder="Ex. Camille" required /></label>
-          <label className="field"><span>Ton e-mail</span><input type="email" value={organizerEmail} onChange={(event) => setOrganizerEmail(event.target.value)} maxLength={254} autoComplete="email" placeholder="toi@exemple.fr" required /><small className="field-help">On y envoie ton lien privé de gestion. Pense à vérifier tes spams.</small></label>
+          <label className="field"><span>Ton mail pour récupérer ton lien si tu le perds. On pourra aussi te demander ce que t&apos;en as pensé — pas de spam, promis.</span><input aria-label="Ton e-mail" type="email" value={organizerEmail} onChange={(event) => setOrganizerEmail(event.target.value)} maxLength={254} autoComplete="email" placeholder="toi@exemple.fr" required /><small className="field-help">Déjà créé une sortie ? <a href="/recuperer-mon-lien">Récupère ton lien privé.</a></small></label>
           <label className="field"><span>Nombre de places</span><input type="number" min="2" max="200" step="1" value={maxPlaces} onChange={(event) => setMaxPlaces(event.target.value)} required /></label>
           <label className="field"><span>Budget par personne <i>optionnel</i></span><div className="input-suffix"><input type="number" min="10" step="10" value={budget} onChange={(event) => setBudget(event.target.value)} /><b>€</b></div></label>
           <div className="itinerary-heading"><span className="step-label">ITINÉRAIRE · 1 OU 2 LIEUX</span><h3>Comment va se dérouler la sortie ?</h3><p>Indique le lieu et sa ville. Tu peux ajouter un lien Google Maps classique si tu l’as.</p></div>

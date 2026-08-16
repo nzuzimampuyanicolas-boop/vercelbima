@@ -62,6 +62,14 @@ Toutes les interfaces passent par la même limitation dans l’Edge Function Sup
 
 L’identité réseau est hachée avec un secret serveur avant la création du compteur. Une empreinte technique minimale est utilisée uniquement lorsque l’adresse réseau est indisponible. Aucune adresse IP n’est conservée en clair. Les compteurs expirés sont supprimés automatiquement. Une requête refusée reçoit le statut HTTP `429`, un compte à rebours compréhensible et l’en-tête `Retry-After`. Seuls le type de limite et le délai sont journalisés, jamais l’identité ou son empreinte.
 
+## E-mail organisateur et récupération du lien
+
+L’e-mail est demandé uniquement à l’organisateur pendant la création. Il est stocké sur `bima_events` et sert à envoyer le lien privé, à générer un nouveau lien depuis `/recuperer-mon-lien` en cas de perte, et à permettre une demande ponctuelle de feedback. Les invités ne fournissent ni compte ni e-mail.
+
+La récupération ne révèle jamais si une adresse existe. La route publique transmet la demande au backend avec le secret serveur, génère de nouveaux liens courts hashés, puis les envoie via le Gmail déjà configuré. Les demandes sont limitées par réseau et par e-mail haché. L’adresse n’est pas inscrite à une liste marketing sans consentement supplémentaire explicite.
+
+La vue administrateur expose le statut dérivé du système existant : `En cours`, `Confirmée` ou `Abandonnée` lorsque toutes les dates sont passées sans confirmation. Elle affiche aussi la date prévue et indique les sorties confirmées prêtes pour une relance feedback deux jours après leur fin.
+
 ## Modèle temporel
 
 Deux formats d’événement sont pris en charge :

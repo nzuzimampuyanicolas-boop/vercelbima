@@ -95,6 +95,42 @@ export async function sendManagementEmail({
   }
 }
 
+export async function sendManagementRecoveryEmail({
+  to,
+  organizerName,
+  events,
+}: {
+  to: string;
+  organizerName: string;
+  events: Array<{ title: string; manageUrl: string; eventType: "outing" | "stay" }>;
+}) {
+  const safeName = escapeHtml(organizerName || "l’organisateur");
+  const textLinks = events.flatMap((event) => [event.title, event.manageUrl, ""]);
+  const htmlLinks = events.map((event) => {
+    const safeTitle = escapeHtml(event.title);
+    const safeUrl = escapeHtml(event.manageUrl);
+    const label = event.eventType === "stay" ? "séjour" : "sortie";
+    return `<div style="margin:0 0 14px;padding:16px;border:1px solid #ead8c8;border-radius:14px;background:#fffaf4"><p style="margin:0 0 10px;font-size:17px;font-weight:800">${safeTitle}</p><a href="${safeUrl}" style="display:inline-block;border-radius:999px;background:#ed633d;color:#fff;padding:11px 17px;text-decoration:none;font-weight:800">Gérer ${label} →</a></div>`;
+  }).join("");
+
+  await sendBimaEmail({
+    to,
+    subject: events.length > 1 ? "Tes liens privés BIMA sont de retour 🔐" : `Ton lien privé pour « ${events[0]?.title || "ta sortie"} »`,
+    text: [
+      `Hello ${organizerName || "toi"} 👋`,
+      "",
+      "Tu nous as demandé de retrouver tes accès privés BIMA.",
+      "",
+      ...textLinks,
+      "Ces liens sont privés : ne les partage pas avec les invités.",
+      "",
+      "À très vite,",
+      "BIMA",
+    ].join("\n"),
+    html: `<div style="margin:0;background:#fffaf4;padding:32px 16px;font-family:Inter,Arial,sans-serif;color:#141613"><div style="max-width:560px;margin:auto;background:#fff;border:1px solid #ead8c8;border-radius:20px;overflow:hidden"><div style="padding:22px 28px;background:#14545d;color:#fff;font-size:22px;font-weight:800">BIMA <span style="color:#f4b942">●</span></div><div style="padding:30px 28px"><p style="margin:0 0 8px;color:#ed633d;font-weight:800">ACCÈS RETROUVÉ 🔐</p><h1 style="margin:0 0 16px;font-size:30px;line-height:1.1">Hello ${safeName} !</h1><p style="margin:0 0 22px;line-height:1.6">Voici ${events.length > 1 ? "tes nouveaux liens privés" : "ton nouveau lien privé"} pour retrouver tes espaces de gestion.</p>${htmlLinks}<p style="margin:22px 0 0;color:#60777a;font-size:13px;line-height:1.55">Ces liens donnent accès aux réponses et à la confirmation. Garde-les pour toi.</p></div></div></div>`,
+  });
+}
+
 export type OrganizerNotificationKind = "participant_joined" | "event_full" | "deadline_48h" | "deadline_reached";
 
 export async function sendOrganizerNotificationEmail({
