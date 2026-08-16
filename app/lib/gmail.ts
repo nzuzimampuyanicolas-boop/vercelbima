@@ -1,6 +1,12 @@
 import nodemailer from "nodemailer";
 
 const GMAIL_SENDER = "bima.sorties@gmail.com";
+const BIMA_PUBLIC_URL = (process.env.BIMA_PUBLIC_URL || "https://bima-app-sigma.vercel.app").replace(/\/$/, "");
+const EMAIL_LOGO_URL = `${BIMA_PUBLIC_URL}/bima-logo-white.png`;
+
+function emailHeader() {
+  return `<div style="padding:20px 28px;background:#14545d"><img src="${EMAIL_LOGO_URL}" alt="BIMA" width="54" height="54" style="display:block;width:54px;height:54px;border:0;outline:none;text-decoration:none" /></div>`;
+}
 
 function escapeHtml(value: string) {
   return value
@@ -74,7 +80,7 @@ export async function sendManagementEmail({
       html: `
         <div style="margin:0;background:#fffaf4;padding:32px 16px;font-family:Inter,Arial,sans-serif;color:#141613">
           <div style="max-width:560px;margin:auto;background:#fff;border:1px solid #ead8c8;border-radius:20px;overflow:hidden">
-            <div style="padding:22px 28px;background:#14545d;color:#fff;font-size:22px;font-weight:800">BIMA <span style="color:#f4b942">●</span></div>
+            ${emailHeader()}
             <div style="padding:30px 28px">
               <p style="margin:0 0 8px;color:#ed633d;font-weight:800">C’EST PARTI 🎉</p>
               <h1 style="margin:0 0 16px;font-size:30px;line-height:1.1">Hello ${safeName} !</h1>
@@ -127,7 +133,7 @@ export async function sendManagementRecoveryEmail({
       "À très vite,",
       "BIMA",
     ].join("\n"),
-    html: `<div style="margin:0;background:#fffaf4;padding:32px 16px;font-family:Inter,Arial,sans-serif;color:#141613"><div style="max-width:560px;margin:auto;background:#fff;border:1px solid #ead8c8;border-radius:20px;overflow:hidden"><div style="padding:22px 28px;background:#14545d;color:#fff;font-size:22px;font-weight:800">BIMA <span style="color:#f4b942">●</span></div><div style="padding:30px 28px"><p style="margin:0 0 8px;color:#ed633d;font-weight:800">ACCÈS RETROUVÉ 🔐</p><h1 style="margin:0 0 16px;font-size:30px;line-height:1.1">Hello ${safeName} !</h1><p style="margin:0 0 22px;line-height:1.6">Voici ${events.length > 1 ? "tes nouveaux liens privés" : "ton nouveau lien privé"} pour retrouver tes espaces de gestion.</p>${htmlLinks}<p style="margin:22px 0 0;color:#60777a;font-size:13px;line-height:1.55">Ces liens donnent accès aux réponses et à la confirmation. Garde-les pour toi.</p></div></div></div>`,
+    html: `<div style="margin:0;background:#fffaf4;padding:32px 16px;font-family:Inter,Arial,sans-serif;color:#141613"><div style="max-width:560px;margin:auto;background:#fff;border:1px solid #ead8c8;border-radius:20px;overflow:hidden">${emailHeader()}<div style="padding:30px 28px"><p style="margin:0 0 8px;color:#ed633d;font-weight:800">ACCÈS RETROUVÉ 🔐</p><h1 style="margin:0 0 16px;font-size:30px;line-height:1.1">Hello ${safeName} !</h1><p style="margin:0 0 22px;line-height:1.6">Voici ${events.length > 1 ? "tes nouveaux liens privés" : "ton nouveau lien privé"} pour retrouver tes espaces de gestion.</p>${htmlLinks}<p style="margin:22px 0 0;color:#60777a;font-size:13px;line-height:1.55">Ces liens donnent accès aux réponses et à la confirmation. Garde-les pour toi.</p></div></div></div>`,
   });
 }
 
@@ -192,6 +198,6 @@ export async function sendOrganizerNotificationEmail({
     to,
     subject: copy.subject,
     text: [`Hello ${organizerName} 👋`, "", copy.title, copy.message, "", manageUrl, "", "À très vite,", "BIMA"].join("\n"),
-    html: `<div style="margin:0;background:#fffaf4;padding:32px 16px;font-family:Inter,Arial,sans-serif;color:#141613"><div style="max-width:560px;margin:auto;background:#fff;border:1px solid #ead8c8;border-radius:20px;overflow:hidden"><div style="padding:22px 28px;background:#14545d;color:#fff;font-size:22px;font-weight:800">BIMA <span style="color:#f4b942">●</span></div><div style="padding:30px 28px"><p style="margin:0 0 8px;color:#ed633d;font-weight:800">${copy.eyebrow}</p><h1 style="margin:0 0 16px;font-size:30px;line-height:1.1">Hello ${safeName} !</h1><p style="margin:0 0 8px;font-size:19px;font-weight:800">${safeTitle}</p><p style="margin:0 0 22px;line-height:1.6">${safeMessage}</p><a href="${safeManageUrl}" style="display:inline-block;border-radius:999px;background:#ed633d;color:#fff;padding:14px 22px;text-decoration:none;font-weight:800">${copy.cta}</a><p style="margin:24px 0 0;color:#60777a;font-size:13px;line-height:1.55">Tu peux modifier les e-mails reçus depuis ton espace de gestion.</p></div></div></div>`,
+    html: `<div style="margin:0;background:#fffaf4;padding:32px 16px;font-family:Inter,Arial,sans-serif;color:#141613"><div style="max-width:560px;margin:auto;background:#fff;border:1px solid #ead8c8;border-radius:20px;overflow:hidden">${emailHeader()}<div style="padding:30px 28px"><p style="margin:0 0 8px;color:#ed633d;font-weight:800">${copy.eyebrow}</p><h1 style="margin:0 0 16px;font-size:30px;line-height:1.1">Hello ${safeName} !</h1><p style="margin:0 0 8px;font-size:19px;font-weight:800">${safeTitle}</p><p style="margin:0 0 22px;line-height:1.6">${safeMessage}</p><a href="${safeManageUrl}" style="display:inline-block;border-radius:999px;background:#ed633d;color:#fff;padding:14px 22px;text-decoration:none;font-weight:800">${copy.cta}</a><p style="margin:24px 0 0;color:#60777a;font-size:13px;line-height:1.55">Tu peux modifier les e-mails reçus depuis ton espace de gestion.</p></div></div></div>`,
   });
 }

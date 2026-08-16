@@ -374,3 +374,14 @@ test("recovers organizer management links without adding email to the guest flow
   assert.match(privacy, /liste de diffusion marketing sans un consentement supplémentaire explicite/);
   assert.match(readme, /Les invités ne fournissent ni compte ni e-mail/);
 });
+
+test("uses the white BIMA logo in every transactional email header", async () => {
+  const gmail = await source("app/lib/gmail.ts");
+  const logo = await stat(new URL("public/bima-logo-white.png", root));
+
+  assert.ok(logo.size > 0);
+  assert.match(gmail, /EMAIL_LOGO_URL = `\$\{BIMA_PUBLIC_URL\}\/bima-logo-white\.png`/);
+  assert.match(gmail, /<img src="\$\{EMAIL_LOGO_URL\}" alt="BIMA" width="54" height="54"/);
+  assert.equal(gmail.match(/\$\{emailHeader\(\)\}/g)?.length, 3);
+  assert.doesNotMatch(gmail, />BIMA <span style=/);
+});
