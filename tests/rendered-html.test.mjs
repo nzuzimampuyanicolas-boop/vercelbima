@@ -242,6 +242,8 @@ test("publishes crawl rules, a focused sitemap, and route-specific metadata", as
   ]);
 
   assert.match(layout, /template: "%s \| BIMA"/);
+  assert.match(layout, /default: "BIMA \| Organisez vos sorties entre amis"/);
+  assert.equal(layout.match(/title: "BIMA \| Organisez vos sorties entre amis"/g)?.length, 2);
   assert.match(layout, /alternates: \{ canonical: "\/" \}/);
   assert.match(seo, /max-image-preview/);
   assert.match(robots, /disallow: \["\/admin", "\/api\/", "\/m\/", "\/p\/", "\/recuperer-mon-lien"\]/);
