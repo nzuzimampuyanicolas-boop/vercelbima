@@ -387,3 +387,17 @@ test("uses the white BIMA logo in every transactional email header", async () =>
   assert.equal(gmail.match(/\$\{emailHeader\(\)\}/g)?.length, 3);
   assert.doesNotMatch(gmail, />BIMA <span style=/);
 });
+
+test("collects Vercel traffic and performance statistics on every page", async () => {
+  const [layout, packageJson] = await Promise.all([
+    source("app/layout.tsx"),
+    source("package.json"),
+  ]);
+
+  assert.match(packageJson, /"@vercel\/analytics": "2\.0\.1"/);
+  assert.match(packageJson, /"@vercel\/speed-insights": "2\.0\.0"/);
+  assert.match(layout, /import \{ Analytics \} from "@vercel\/analytics\/next"/);
+  assert.match(layout, /import \{ SpeedInsights \} from "@vercel\/speed-insights\/next"/);
+  assert.match(layout, /<Analytics \/>/);
+  assert.match(layout, /<SpeedInsights \/>/);
+});
