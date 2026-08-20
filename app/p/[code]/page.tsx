@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { createPageMetadata } from "../../lib/seo";
-import { BimaApp } from "../../page";
+import BimaApp from "../../page";
 
 type ParticipantPageProps = { params: Promise<{ code: string }> };
 

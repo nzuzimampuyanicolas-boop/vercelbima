@@ -66,6 +66,10 @@ export type EventPayload = {
     managePath?: string
 }
 
+export function hasMultipleSteps(places: readonly Place[]) {
+    return places.length > 1
+}
+
 export type ThemeProps = {
     apiBaseUrl?: string
     logo?: string

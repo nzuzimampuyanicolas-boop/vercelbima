@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { bimaBackendUrl } from "../../api/_shared";
 import { createPageMetadata } from "../../lib/seo";
-import { BimaApp } from "../../page";
+import BimaApp from "../../page";
 
 type EventPageProps = { params: Promise<{ slug: string }> };
 

@@ -1,12 +1,81 @@
 import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
+import { getCapacityCount, getCapacityReferenceDate, hasMultipleSteps } from "../app/lib/event-metrics.ts";
 
 const root = new URL("../", import.meta.url);
 
 async function source(path) {
   return readFile(new URL(path, root), "utf8");
 }
+
+test("counts available people for the capacity reference date", () => {
+  const dates = [
+    { id: "date-a", availableCount: 5 },
+    { id: "date-b", availableCount: 8 },
+    { id: "date-c", availableCount: 4 },
+  ];
+
+  assert.equal(getCapacityCount([{ id: "date-a", availableCount: 5 }], null), 5);
+  assert.equal(getCapacityCount([{ id: "date-a", availableCount: 7 }], null), 7);
+  assert.equal(getCapacityCount([{ id: "date-a", availableCount: 3 }], null), 3);
+  assert.equal(getCapacityReferenceDate(dates, null)?.id, "date-b");
+  assert.equal(getCapacityCount(dates, null), 8);
+  assert.equal(getCapacityCount([{ ...dates[2], availableCount: 9 }, dates[0], dates[1]], "date-c"), 9);
+});
+
+test("keeps response and capacity metrics separate in the organizer UI", async () => {
+  const page = await source("app/page.tsx");
+
+  assert.match(page, /const capacityCount = getCapacityCount\(event\.dates, event\.confirmedDateId\)/);
+  assert.match(page, /<b>\{capacityCount\} disponibles<small>\{capacityDateLabel\} · \{event\.maxPlaces\} max<\/small><\/b>/);
+  assert.match(page, /payload\.summary\.guestCount/);
+  assert.match(page, /invité\{payload\.summary\.guestCount > 1 \? "s ont" : " a"\} répondu/);
+  assert.match(page, /selectedDate\.availableCount\} participant/);
+});
+
+test("asks for stage attendance only when an event has multiple steps", async () => {
+  const [page, kit, guest, manage] = await Promise.all([
+    source("app/page.tsx"),
+    source("framer/multipage/BimaKit.tsx"),
+    source("framer/multipage/BimaGuest.tsx"),
+    source("framer/multipage/BimaManage.tsx"),
+  ]);
+
+  assert.equal(hasMultipleSteps([]), false);
+  assert.equal(hasMultipleSteps(["restaurant"]), false);
+  assert.equal(hasMultipleSteps(["restaurant", "bowling"]), true);
+  assert.equal(hasMultipleSteps(["restaurant", "bowling", "bar"]), true);
+  assert.match(page, /hasMultipleSteps\(eventPayload\.event\.places\) && me/);
+  assert.match(page, /hasMultipleSteps\(payload\.event\.places\) \? \{ availablePlaceIds \} : \{\}/);
+  assert.match(page, /\{hasMultipleSteps\(event\.places\) && <section className="stage-vote-card"/);
+  assert.match(page, /\{multipleSteps && <div className="organizer-vote organizer-stage-vote"/);
+  assert.match(page, /\{multipleSteps && <div className="matrix-card stage-matrix-card"/);
+  assert.match(kit, /export function hasMultipleSteps/);
+  assert.match(guest, /hasMultipleSteps\(event\.places\) && <section className="stage-question"/);
+  assert.match(manage, /hasMultipleSteps\(event\.places\) && <div className="matrix-card stage-matrix-card"/);
+});
+
+test("clarifies capacity, date availability, and multi-step attendance", async () => {
+  const [page, css, guest, manage] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("framer/multipage/BimaGuest.tsx"),
+    source("framer/multipage/BimaManage.tsx"),
+  ]);
+
+  assert.match(page, /\{capacityCount\} disponibles/);
+  assert.match(page, /à la date confirmée/);
+  assert.match(page, /sur la meilleure date/);
+  assert.match(page, />DISPONIBLES<\/div>/);
+  assert.match(page, /Qui vient à quelle étape \?/);
+  assert.match(page, /Chacun peut participer à seulement une partie de la sortie\./);
+  assert.match(page, /PRÉSENTS PAR ÉTAPE/);
+  assert.match(page, /multipleSteps \? " \+ tes étapes" : ""/);
+  assert.match(css, /\.status-panel > b \{ display: grid;/);
+  assert.match(guest, /Après tes dates, choisis les étapes auxquelles tu participeras\./);
+  assert.match(manage, /Qui vient à quelle étape \?/);
+});
 
 test("lets every participant choose any combination of itinerary stages", async () => {
   const [page, css] = await Promise.all([
@@ -105,7 +174,7 @@ test("keeps the Framer guest and organizer pages aligned with the backend", asyn
   assert.match(guest, /availablePlaceIds/);
   assert.match(guest, /À quelles étapes seras-tu là \?/);
   assert.match(manage, /availablePlaceIds/);
-  assert.match(manage, /Présence à chaque étape/);
+  assert.match(manage, /Qui vient à quelle étape \?/);
   assert.match(admin, /"stageVotes"/);
   assert.match(admin, /Présence aux étapes/);
 });

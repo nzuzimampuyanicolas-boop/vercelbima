@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { BimaApp } from "../page";
+import BimaApp from "../page";
 import { createPageMetadata } from "../lib/seo";
 
 export const metadata: Metadata = createPageMetadata({

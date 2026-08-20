@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { getCapacityCount, hasMultipleSteps } from "./lib/event-metrics";
 
 type Mode = "home" | "create" | "share" | "respond" | "saved" | "manage" | "confirmed";
 
@@ -186,7 +187,7 @@ type BimaAppProps = {
   initialParticipantShortCode?: string;
 };
 
-export function BimaApp({ initialEventSlug = "", initialManageShortCode = "", initialParticipantShortCode = "" }: BimaAppProps = {}) {
+export default function BimaApp({ initialEventSlug = "", initialManageShortCode = "", initialParticipantShortCode = "" }: BimaAppProps = {}) {
   const [mode, setMode] = useState<Mode>("home");
   const [initializing, setInitializing] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -212,7 +213,9 @@ export function BimaApp({ initialEventSlug = "", initialManageShortCode = "", in
     const me = eventPayload.me;
     setName(me?.name || "");
     setAvailableDateIds(me ? Object.entries(me.answers).filter(([, answer]) => answer).map(([id]) => id) : []);
-    setAvailablePlaceIds(me ? Object.entries(me.stageAnswers).filter(([, answer]) => answer).map(([id]) => id) : []);
+    setAvailablePlaceIds(hasMultipleSteps(eventPayload.event.places) && me
+      ? Object.entries(me.stageAnswers).filter(([, answer]) => answer).map(([id]) => id)
+      : []);
   }, []);
 
   const loadEvent = useCallback(async (slug: string, manager = "", personal = "") => {
@@ -374,7 +377,7 @@ export function BimaApp({ initialEventSlug = "", initialManageShortCode = "", in
           participantShortCode,
           manageShortCode,
           availableDateIds,
-          availablePlaceIds,
+          ...(hasMultipleSteps(payload.event.places) ? { availablePlaceIds } : {}),
         }),
       });
       const updated = await readPayload<EventResponse & { participantToken: string; participantShortCode: string; manageShortCode?: string }>(response);
@@ -601,10 +604,6 @@ export function BimaApp({ initialEventSlug = "", initialManageShortCode = "", in
   );
 }
 
-export default function Home() {
-  return <BimaApp />;
-}
-
 function HomeLanding({ onCreate }: { onCreate: () => void }) {
   return (
     <section className="home-screen">
@@ -819,7 +818,8 @@ function CreatePage({
 function SharePage({ payload, copied, onCopy, onManage }: { payload: CreatedEventResponse; copied: boolean; onCopy: (text: string, message?: string) => Promise<void>; onManage: () => void }) {
   const shareUrl = absoluteUrl(payload.sharePath);
   const timingWord = payload.event.eventType === "stay" ? "périodes" : "dates";
-  const message = `🎉 ${payload.event.title}, ça se prépare !\n\n1️⃣ Clique\n2️⃣ Coche tes ${timingWord} + tes étapes\n3️⃣ Et hop, on trouve le bon moment 😎\n\n⏱️ 20 sec, sans compte :\n${shareUrl}`;
+  const multipleSteps = hasMultipleSteps(payload.event.places);
+  const message = `🎉 ${payload.event.title}, ça se prépare !\n\n1️⃣ Clique\n2️⃣ Coche tes ${timingWord}${multipleSteps ? " + tes étapes" : ""}\n3️⃣ Et hop, on trouve le bon moment 😎\n\n⏱️ 20 sec, sans compte :\n${shareUrl}`;
   const shareInvitation = async () => {
     if (navigator.share) {
       try {
@@ -842,7 +842,7 @@ function SharePage({ payload, copied, onCopy, onManage }: { payload: CreatedEven
       <section className="invitation-card" aria-labelledby="invitation-title">
         <span className="step-label" id="invitation-title">LIEN À ENVOYER AU GROUPE</span>
         <h3>À eux de jouer !</h3>
-        <p>Tes proches pourront choisir leurs {timingWord} et leurs étapes. Ils n’auront pas accès à la gestion.</p>
+        <p>Tes proches pourront choisir leurs {timingWord}{multipleSteps ? " et leurs étapes" : ""}. Ils n’auront pas accès à la gestion.</p>
         <div className="share-actions">
           <button className="share-primary" type="button" onClick={() => void shareInvitation()}>Partager l’invitation</button>
           <button className="secondary" type="button" onClick={() => void onCopy(shareUrl, "Lien d’invitation copié")}>{copied ? "Lien copié !" : "Copier le lien d’invitation"}</button>
@@ -894,11 +894,11 @@ function RespondPage({ payload, name, setName, availableDateIds, setAvailableDat
             return <button type="button" className={`availability ${selected ? "yes" : ""}`} key={date.id} onClick={() => setAvailableDateIds(selected ? availableDateIds.filter((id) => id !== date.id) : [...availableDateIds, date.id])} aria-pressed={selected}><div className="calendar"><b>{parts.number}</b><span>{parts.month}</span></div><div><strong>{formatEventDate(date, event.eventType)}</strong><small>{date.availableCount} personne{date.availableCount > 1 ? "s" : ""} disponible{date.availableCount > 1 ? "s" : ""}</small></div><div className="choice"><span>{selected ? "Disponible" : "Pas dispo"}</span><i>{selected ? "✓" : "×"}</i></div></button>;
           })}
         </div>
-        <section className="stage-vote-card" aria-labelledby="stage-vote-title">
-          <div className="stage-vote-heading"><div><span className="step-label">TON PROGRAMME</span><h3 id="stage-vote-title">À quelles étapes seras-tu là ?</h3><p>Choisis toutes les étapes auxquelles tu participeras.</p></div><b>{availablePlaceIds.length === event.places.length ? "Toute la sortie" : availablePlaceIds.length ? `${availablePlaceIds.length} étape${availablePlaceIds.length > 1 ? "s" : ""}` : "Aucune étape"}</b></div>
+        {hasMultipleSteps(event.places) && <section className="stage-vote-card" aria-labelledby="stage-vote-title">
+          <div className="stage-vote-heading"><div><span className="step-label">TA PRÉSENCE</span><h3 id="stage-vote-title">À quelles étapes seras-tu là ?</h3><p>Après tes dates, choisis les étapes auxquelles tu participeras.</p></div><b>{availablePlaceIds.length === event.places.length ? "Toute la sortie" : availablePlaceIds.length ? `${availablePlaceIds.length} étape${availablePlaceIds.length > 1 ? "s" : ""}` : "Aucune étape"}</b></div>
           <div className="stage-choice-list">{event.places.map((place, index) => { const selected = availablePlaceIds.includes(place.id); return <button type="button" className={selected ? "selected" : ""} key={place.id} onClick={() => setAvailablePlaceIds(selected ? availablePlaceIds.filter((id) => id !== place.id) : [...availablePlaceIds, place.id])} aria-pressed={selected}><span><i>{index + 1}</i><small>Étape {index + 1}</small><strong>{place.name}</strong></span><b>{selected ? "✓ Je serai là" : "× Je ne serai pas là"}</b></button>; })}</div>
           <p className="stage-vote-help">Tu peux sélectionner toutes les étapes, une seule, ou aucune.</p>
-        </section>
+        </section>}
         {error && <div className="form-error" role="alert">{error}</div>}
         <button className="primary full-button" onClick={() => void onSubmit()} disabled={busy}>{busy ? "Enregistrement…" : payload.me ? "Mettre à jour mes réponses" : "Valider mes réponses"} <span>→</span></button>
         <p className="privacy">Aucun compte, aucun email. Ton lien personnel permet de modifier ta réponse.</p>
@@ -909,7 +909,7 @@ function RespondPage({ payload, name, setName, availableDateIds, setAvailableDat
 
 function SavedPage({ payload, participantToken, participantShortCode, copied, onCopy }: { payload: EventResponse; participantToken: string; participantShortCode: string; copied: boolean; onCopy: (text: string, message?: string) => Promise<void> }) {
   const personalUrl = absoluteUrl(participantShortCode ? `/p/${encodeURIComponent(participantShortCode)}` : `/?event=${encodeURIComponent(payload.event.slug)}&participant=${encodeURIComponent(participantToken)}`);
-  return <section className="center-page compact"><div className="success-mark pop">✓</div><h2>C’est noté{payload.me?.name ? `, ${payload.me.name}` : ""} !</h2><p className="lead">{payload.event.organizerName} voit maintenant tes {payload.event.eventType === "stay" ? "périodes" : "dates"} et les étapes choisies.</p><div className="token-card"><span>TON LIEN PERSONNEL</span><p>{personalUrl}</p><button onClick={() => void onCopy(personalUrl, "Lien personnel copié")}>{copied ? "Copié" : "Copier"}</button></div><div className="notice warning"><span>★</span><p><b>Conserve ce lien.</b><br />Il permet de modifier tes réponses plus tard, même depuis un autre appareil.</p></div><a className="text-link share-link" href={personalUrl}>Modifier mes réponses →</a></section>;
+  return <section className="center-page compact"><div className="success-mark pop">✓</div><h2>C’est noté{payload.me?.name ? `, ${payload.me.name}` : ""} !</h2><p className="lead">{payload.event.organizerName} voit maintenant tes {payload.event.eventType === "stay" ? "périodes" : "dates"}{hasMultipleSteps(payload.event.places) ? " et les étapes choisies" : ""}.</p><div className="token-card"><span>TON LIEN PERSONNEL</span><p>{personalUrl}</p><button onClick={() => void onCopy(personalUrl, "Lien personnel copié")}>{copied ? "Copié" : "Copier"}</button></div><div className="notice warning"><span>★</span><p><b>Conserve ce lien.</b><br />Il permet de modifier tes réponses plus tard, même depuis un autre appareil.</p></div><a className="text-link share-link" href={personalUrl}>Modifier mes réponses →</a></section>;
 }
 
 function EditEventPanel({ event, participantCount, busy, onCancel, onSave }: {
@@ -997,24 +997,27 @@ function ManagePage({ payload, name, availableDateIds, setAvailableDateIds, avai
   const event = payload.event;
   const voters = payload.voters || [];
   const bestCount = Math.max(0, ...event.dates.map((date) => date.availableCount));
+  const capacityCount = getCapacityCount(event.dates, event.confirmedDateId);
+  const multipleSteps = hasMultipleSteps(event.places);
+  const capacityDateLabel = event.confirmedDateId ? "à la date confirmée" : "sur la meilleure date";
   const shareUrl = absoluteUrl(eventSharePath(event.slug));
   const selectedDate = event.dates.find((date) => date.id === event.confirmedDateId);
   const rowStyle = { gridTemplateColumns: `1.6fr repeat(${event.dates.length}, minmax(120px, 1fr))` };
   const stageRowStyle = { gridTemplateColumns: `1.6fr repeat(${event.places.length}, minmax(150px, 1fr))` };
   return (
     <section className="manage-page">
-      <div className="management-head"><div><span className="step-label">PAGE PRIVÉE · ORGANISATEUR</span><h2>{event.title}</h2><p>{event.city} · {event.maxPlaces} places{event.responseDeadline ? ` · Réponses jusqu’au ${formatDate(`${event.responseDeadline}T12:00:00`, { day: "numeric", month: "long" })}` : ""}</p></div><div className="status-panel"><span>{event.status === "confirmed" ? `✓ ${event.eventType === "stay" ? "Période" : "Date"} confirmée` : "● Réponses en cours"}</span><b>{payload.summary.participantCount}<small>/{event.maxPlaces} places</small></b></div></div>
-      <div className="manage-toolbar"><div><b>{payload.summary.guestCount} invité{payload.summary.guestCount > 1 ? "s ont" : " a"} répondu · ton vote est inclus</b><span>Les résultats sont lus directement depuis BIMA.</span></div><button className="secondary" onClick={() => setEditing((value) => !value)}>{editing ? "Fermer" : "Modifier les informations"}</button><button className="secondary" onClick={() => void onCopy(shareUrl, "Lien invité copié")}>{copied ? "Copié" : "Copier le lien"}</button><a className="dark-button share-link" href={`https://wa.me/?text=${encodeURIComponent(`🎉 ${event.title} : 20 sec pour cocher tes dispos et tes étapes 👉 ${shareUrl}`)}`} target="_blank" rel="noreferrer">↗ Relancer</a></div>
+      <div className="management-head"><div><span className="step-label">PAGE PRIVÉE · ORGANISATEUR</span><h2>{event.title}</h2><p>{event.city} · {event.maxPlaces} places{event.responseDeadline ? ` · Réponses jusqu’au ${formatDate(`${event.responseDeadline}T12:00:00`, { day: "numeric", month: "long" })}` : ""}</p></div><div className="status-panel"><span>{event.status === "confirmed" ? `✓ ${event.eventType === "stay" ? "Période" : "Date"} confirmée` : "● Réponses en cours"}</span><b>{capacityCount} disponibles<small>{capacityDateLabel} · {event.maxPlaces} max</small></b></div></div>
+      <div className="manage-toolbar"><div><b>{payload.summary.guestCount} invité{payload.summary.guestCount > 1 ? "s ont" : " a"} répondu · ton vote est inclus</b><span>Les résultats sont lus directement depuis BIMA.</span></div><button className="secondary" onClick={() => setEditing((value) => !value)}>{editing ? "Fermer" : "Modifier les informations"}</button><button className="secondary" onClick={() => void onCopy(shareUrl, "Lien invité copié")}>{copied ? "Copié" : "Copier le lien"}</button><a className="dark-button share-link" href={`https://wa.me/?text=${encodeURIComponent(`🎉 ${event.title} : 20 sec pour cocher tes dispos${multipleSteps ? " et tes étapes" : ""} 👉 ${shareUrl}`)}`} target="_blank" rel="noreferrer">↗ Relancer</a></div>
       {editing && <EditEventPanel event={event} participantCount={payload.summary.participantCount} busy={busy} onCancel={() => setEditing(false)} onSave={async (input) => { await onUpdate(input); setEditing(false); }} />}
       <NotificationPreferencesPanel preferences={payload.notificationPreferences || { newResponses: true, reminders: true, active: false }} busy={busy} onSave={onUpdateNotifications} />
       <section className="participant-manager" aria-labelledby="participant-manager-title"><div><span className="step-label">LISTE DES PARTICIPANTS</span><h3 id="participant-manager-title">Qui est dans la boucle ?</h3><p>Une erreur ou un doublon ? Tu peux retirer un invité ici.</p></div><div className="participant-list">{voters.map((voter) => <div key={voter.id}><span className={voter.role === "organizer" ? "organizer-color" : "blue"}>{voter.name.slice(0, 2).toUpperCase()}</span><p><b>{voter.name}</b><small>{voter.role === "organizer" ? "Organisateur · toi" : "Invité"}</small></p>{voter.role === "guest" ? <button type="button" onClick={() => void onDeleteParticipant(voter)} disabled={busy} aria-label={`Retirer ${voter.name}`}>Retirer</button> : <em>Protégé</em>}</div>)}</div></section>
       {selectedDate && <div className="manage-confirmed"><div><span>{event.eventType === "stay" ? "PÉRIODE CONFIRMÉE" : "DATE CONFIRMÉE"}</span><b>{formatEventDate(selectedDate, event.eventType)}</b></div><a className="primary share-link" href={`/api/events/${encodeURIComponent(event.slug)}/calendar`}>Télécharger le calendrier .ics</a></div>}
       <div className="organizer-vote"><div className="organizer-vote-heading"><span className="organizer-avatar">{name.slice(0, 2).toUpperCase() || "OR"}</span><div><b>Mes disponibilités</b><small>Ton vote compte comme celui de chaque invité.</small></div><em>ORGANISATEUR</em></div><div className="organizer-options" style={{ gridTemplateColumns: `repeat(${Math.min(event.dates.length, 4)}, 1fr)` }}>{event.dates.map((date) => { const selected = availableDateIds.includes(date.id); return <button type="button" className={selected ? "selected" : ""} key={date.id} onClick={() => setAvailableDateIds(selected ? availableDateIds.filter((id) => id !== date.id) : [...availableDateIds, date.id])} aria-pressed={selected}><span>{formatEventDate(date, event.eventType, true).toUpperCase()}</span><b>{selected ? "✓ Disponible" : "× Pas disponible"}</b></button>; })}</div></div>
-      <div className="organizer-vote organizer-stage-vote"><div className="organizer-vote-heading"><span className="organizer-avatar">{name.slice(0, 2).toUpperCase() || "OR"}</span><div><b>Mes étapes</b><small>Indique les parties de la sortie auxquelles tu participeras.</small></div><em>ORGANISATEUR</em></div><div className="organizer-options stage-organizer-options">{event.places.map((place, index) => { const selected = availablePlaceIds.includes(place.id); return <button type="button" className={selected ? "selected" : ""} key={place.id} onClick={() => setAvailablePlaceIds(selected ? availablePlaceIds.filter((id) => id !== place.id) : [...availablePlaceIds, place.id])} aria-pressed={selected}><span>ÉTAPE {index + 1}</span><b>{selected ? `✓ ${place.name}` : "× Absent·e"}</b></button>; })}</div></div>
+      {multipleSteps && <div className="organizer-vote organizer-stage-vote"><div className="organizer-vote-heading"><span className="organizer-avatar">{name.slice(0, 2).toUpperCase() || "OR"}</span><div><b>Ma présence par étape</b><small>Après tes dates, choisis les parties auxquelles tu participeras.</small></div><em>ORGANISATEUR</em></div><div className="organizer-options stage-organizer-options">{event.places.map((place, index) => { const selected = availablePlaceIds.includes(place.id); return <button type="button" className={selected ? "selected" : ""} key={place.id} onClick={() => setAvailablePlaceIds(selected ? availablePlaceIds.filter((id) => id !== place.id) : [...availablePlaceIds, place.id])} aria-pressed={selected}><span>ÉTAPE {index + 1}</span><b>{selected ? `✓ ${place.name}` : "× Absent·e"}</b></button>; })}</div></div>}
       {error && <div className="form-error" role="alert">{error}</div>}
       {event.status !== "confirmed" && <button className="primary organizer-save" onClick={() => void onSaveVote()} disabled={busy}>{busy ? "Enregistrement…" : "Enregistrer mon vote"}</button>}
       <div className="matrix-card"><div className="matrix-title"><h3>{event.status === "confirmed" ? "Résultats des disponibilités" : `Choisis la meilleure ${event.eventType === "stay" ? "période" : "date"}`}</h3><span>Les scores se mettent à jour après chaque réponse</span></div><div className="matrix-scroll"><div className="matrix dynamic-matrix"><div className="matrix-row matrix-header" style={rowStyle}><div>PARTICIPANTS</div>{event.dates.map((date) => <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><span>{event.eventType === "stay" ? "SÉJOUR" : dateParts(date.startsAt).day}</span><b>{formatEventDate(date, event.eventType, true).toUpperCase()}</b><small>{event.eventType === "stay" ? "Départ → retour" : dateParts(date.startsAt).time}</small>{date.availableCount === bestCount && <em>MEILLEURE</em>}</div>)}</div>{voters.map((voter) => <div className={`matrix-row ${voter.role === "organizer" ? "organizer-row" : ""}`} style={rowStyle} key={voter.id}><div className="person"><i className={voter.role === "organizer" ? "organizer-color" : "blue"}>{voter.name.slice(0, 2).toUpperCase()}</i><b>{voter.name}{voter.role === "organizer" && <span>Vous</span>}</b></div>{event.dates.map((date) => <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><span className={voter.answers[date.id] ? "check" : "cross"}>{voter.answers[date.id] ? "✓" : "×"}</span></div>)}</div>)}<div className="matrix-row totals" style={rowStyle}><div>DISPONIBLES</div>{event.dates.map((date) => <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><b>{date.availableCount}/{payload.summary.participantCount}</b></div>)}</div>{event.status !== "confirmed" && <div className="matrix-row actions" style={rowStyle}><div /><>{event.dates.map((date) => <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><button className={date.availableCount === bestCount ? "primary" : "secondary"} onClick={() => void onConfirm(date.id)} disabled={busy}>Confirmer</button></div>)}</></div>}</div></div></div>
-      <div className="matrix-card stage-matrix-card"><div className="matrix-title"><h3>Présence à chaque étape</h3><span>Une personne peut rejoindre seulement une partie de la sortie</span></div><div className="matrix-scroll"><div className="matrix stage-matrix"><div className="matrix-row matrix-header" style={stageRowStyle}><div>PARTICIPANTS</div>{event.places.map((place, index) => <div key={place.id}><span>ÉTAPE {index + 1}</span><b>{place.name}</b></div>)}</div>{voters.map((voter) => <div className={`matrix-row ${voter.role === "organizer" ? "organizer-row" : ""}`} style={stageRowStyle} key={voter.id}><div className="person"><i className={voter.role === "organizer" ? "organizer-color" : "coral"}>{voter.name.slice(0, 2).toUpperCase()}</i><b>{voter.name}</b></div>{event.places.map((place) => <div key={place.id}><span className={voter.stageAnswers[place.id] ? "check" : "cross"}>{voter.stageAnswers[place.id] ? "✓" : "×"}</span></div>)}</div>)}<div className="matrix-row totals" style={stageRowStyle}><div>PRÉSENTS</div>{event.places.map((place) => <div key={place.id}><b>{place.attendingCount}/{payload.summary.participantCount}</b></div>)}</div></div></div></div>
+      {multipleSteps && <div className="matrix-card stage-matrix-card"><div className="matrix-title"><h3>Qui vient à quelle étape ?</h3><span>Chacun peut participer à seulement une partie de la sortie.</span></div><div className="matrix-scroll"><div className="matrix stage-matrix"><div className="matrix-row matrix-header" style={stageRowStyle}><div>PARTICIPANTS</div>{event.places.map((place, index) => <div key={place.id}><span>ÉTAPE {index + 1}</span><b>{place.name}</b></div>)}</div>{voters.map((voter) => <div className={`matrix-row ${voter.role === "organizer" ? "organizer-row" : ""}`} style={stageRowStyle} key={voter.id}><div className="person"><i className={voter.role === "organizer" ? "organizer-color" : "coral"}>{voter.name.slice(0, 2).toUpperCase()}</i><b>{voter.name}</b></div>{event.places.map((place) => <div key={place.id}><span className={voter.stageAnswers[place.id] ? "check" : "cross"}>{voter.stageAnswers[place.id] ? "✓" : "×"}</span></div>)}</div>)}<div className="matrix-row totals" style={stageRowStyle}><div>PRÉSENTS PAR ÉTAPE</div>{event.places.map((place) => <div key={place.id}><b>{place.attendingCount}/{payload.summary.participantCount}</b></div>)}</div></div></div></div>}
       <ItineraryPreview places={event.places} />
       <div className="danger-zone"><div><b>Supprimer cette sortie</b><span>Efface définitivement les lieux, dates, participants et réponses.</span></div><button type="button" onClick={() => void onDelete()} disabled={busy}>Supprimer définitivement</button></div>
     </section>
@@ -1031,7 +1034,7 @@ function ConfirmedPage({ payload, copied, onCopy }: { payload: EventResponse; co
   const programme = event.places.map((place, index) => `${index + 1}. ${place.name}`).join("\n");
   const timingLabel = formatEventDate(selectedDate, event.eventType);
   const message = `C’est confirmé ! 🎉\n${timingLabel}\n${programme}\n\nTous les détails : ${shareUrl}`;
-  return <section className="confirmed-page"><div className="confetti">✦　·　✦　·　✦</div><span className="step-label inverse">{isStay ? "SÉJOUR CONFIRMÉ" : "SORTIE CONFIRMÉE"}</span><h2>{isStay ? "Le séjour est calé !" : `Rendez-vous ${formatDate(selectedDate.startsAt, { weekday: "long" })} !`}</h2><p>{isStay ? "La période est fixée." : "La date est fixée."} Ajoute-la maintenant à ton calendrier.</p><div className="final-ticket"><div className="ticket-date"><span>{parts.day}</span><b>{parts.number}</b><small>{parts.month}</small></div><div className="ticket-info"><h3>{event.title}</h3><p><b>{isStay ? timingLabel : (parts as ReturnType<typeof dateParts>).time}</b> · {event.places[0]?.name || event.city}</p><span>{payload.summary.participantCount} participant{payload.summary.participantCount > 1 ? "s" : ""}{event.budgetEur ? ` · ${event.budgetEur} € / pers.` : ""}</span></div></div><div className="confirmed-itinerary"><ItineraryPreview places={event.places} /></div><div className="final-actions"><a className="white-button share-link" href={`/api/events/${encodeURIComponent(event.slug)}/calendar`}>＋ Ajouter au calendrier (.ics)</a>{event.places[0]?.mapsUrl && <a className="outline-light share-link" href={event.places[0].mapsUrl} target="_blank" rel="noreferrer">↗ Ouvrir dans Maps</a>}</div><div className="confirmation-message"><span>MESSAGE À PARTAGER</span><textarea value={message} readOnly /><div><button onClick={() => void onCopy(message, "Message copié")}>{copied ? "Copié !" : "Copier le message"}</button><a className="share-link" href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer">WhatsApp</a></div></div></section>;
+  return <section className="confirmed-page"><div className="confetti">✦　·　✦　·　✦</div><span className="step-label inverse">{isStay ? "SÉJOUR CONFIRMÉ" : "SORTIE CONFIRMÉE"}</span><h2>{isStay ? "Le séjour est calé !" : `Rendez-vous ${formatDate(selectedDate.startsAt, { weekday: "long" })} !`}</h2><p>{isStay ? "La période est fixée." : "La date est fixée."} Ajoute-la maintenant à ton calendrier.</p><div className="final-ticket"><div className="ticket-date"><span>{parts.day}</span><b>{parts.number}</b><small>{parts.month}</small></div><div className="ticket-info"><h3>{event.title}</h3><p><b>{isStay ? timingLabel : (parts as ReturnType<typeof dateParts>).time}</b> · {event.places[0]?.name || event.city}</p><span>{selectedDate.availableCount} participant{selectedDate.availableCount > 1 ? "s" : ""}{event.budgetEur ? ` · ${event.budgetEur} € / pers.` : ""}</span></div></div><div className="confirmed-itinerary"><ItineraryPreview places={event.places} /></div><div className="final-actions"><a className="white-button share-link" href={`/api/events/${encodeURIComponent(event.slug)}/calendar`}>＋ Ajouter au calendrier (.ics)</a>{event.places[0]?.mapsUrl && <a className="outline-light share-link" href={event.places[0].mapsUrl} target="_blank" rel="noreferrer">↗ Ouvrir dans Maps</a>}</div><div className="confirmation-message"><span>MESSAGE À PARTAGER</span><textarea value={message} readOnly /><div><button onClick={() => void onCopy(message, "Message copié")}>{copied ? "Copié !" : "Copier le message"}</button><a className="share-link" href={`https://wa.me/?text=${encodeURIComponent(message)}`} target="_blank" rel="noreferrer">WhatsApp</a></div></div></section>;
 }
 
 function PlacePreview({ mapsUrl, compact = false, placeData }: { mapsUrl: string; compact?: boolean; placeData: PlaceData | EventPlace }) {

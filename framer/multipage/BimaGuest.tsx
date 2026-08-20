@@ -7,6 +7,7 @@ import {
     DEFAULT_API,
     EventPayload,
     formatDate,
+    hasMultipleSteps,
     PlaceCard,
     readEventParams,
     requestJson,
@@ -62,7 +63,8 @@ export default function BimaGuest({
     }, [apiBaseUrl])
 
     React.useEffect(() => {
-        void loadEvent()
+        const timer = window.setTimeout(() => void loadEvent(), 0)
+        return () => window.clearTimeout(timer)
     }, [loadEvent])
 
     async function submitVote() {
@@ -91,9 +93,13 @@ export default function BimaGuest({
                     availableDateIds: payload.event.dates
                         .filter((date) => answers[date.id])
                         .map((date) => date.id),
-                    availablePlaceIds: payload.event.places
-                        .filter((place) => place.id && stageAnswers[place.id])
-                        .map((place) => place.id),
+                    ...(hasMultipleSteps(payload.event.places)
+                        ? {
+                              availablePlaceIds: payload.event.places
+                                  .filter((place) => place.id && stageAnswers[place.id])
+                                  .map((place) => place.id),
+                          }
+                        : {}),
                 }),
             })
             window.localStorage.setItem(
@@ -203,12 +209,12 @@ export default function BimaGuest({
                                         </button>
                                     ))}
                                 </div>
-                                <section className="stage-question">
+                                {hasMultipleSteps(event.places) && <section className="stage-question">
                                     <div className="stage-question-head">
                                         <div>
                                             <small className="eyebrow">TON PROGRAMME</small>
                                             <h3>À quelles étapes seras-tu là ?</h3>
-                                            <p>Choisis chaque partie de la sortie à laquelle tu participeras.</p>
+                                            <p>Après tes dates, choisis les étapes auxquelles tu participeras.</p>
                                         </div>
                                         <span className="stage-summary">
                                             {event.places.filter((place) => place.id && stageAnswers[place.id]).length === event.places.length
@@ -237,7 +243,7 @@ export default function BimaGuest({
                                         })}
                                     </div>
                                     <p className="stage-help">Tu peux sélectionner toutes les étapes, une seule, ou aucune.</p>
-                                </section>
+                                </section>}
                                 {error && (
                                     <div className="error-box">{error}</div>
                                 )}

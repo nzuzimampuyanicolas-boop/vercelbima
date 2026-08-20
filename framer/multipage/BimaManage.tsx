@@ -7,6 +7,7 @@ import {
     DEFAULT_API,
     EventPayload,
     formatDate,
+    hasMultipleSteps,
     pageUrl,
     PATHS,
     readEventParams,
@@ -76,7 +77,8 @@ export default function BimaManage({
     }, [apiBaseUrl])
 
     React.useEffect(() => {
-        void loadEvent()
+        const timer = window.setTimeout(() => void loadEvent(), 0)
+        return () => window.clearTimeout(timer)
     }, [loadEvent])
 
     async function submitOrganizerVote() {
@@ -99,9 +101,13 @@ export default function BimaManage({
                         availableDateIds: payload.event.dates
                             .filter((date) => answers[date.id])
                             .map((date) => date.id),
-                        availablePlaceIds: payload.event.places
-                            .filter((place) => place.id && stageAnswers[place.id])
-                            .map((place) => place.id),
+                        ...(hasMultipleSteps(payload.event.places)
+                            ? {
+                                  availablePlaceIds: payload.event.places
+                                      .filter((place) => place.id && stageAnswers[place.id])
+                                      .map((place) => place.id),
+                              }
+                            : {}),
                     }),
                 }
             )
@@ -176,8 +182,8 @@ export default function BimaManage({
                             <h1>{event.title}</h1>
                             <p>
                                 {event.city} ·{" "}
-                                {payload.summary.participantCount}{" "}
-                                participant(s)
+                                {payload.summary.guestCount}{" "}
+                                invité(s) ont répondu
                             </p>
                         </div>
                         <span className="status">
@@ -223,9 +229,9 @@ export default function BimaManage({
                                 </button>
                             ))}
                         </div>
-                        <div className="organizer-stage-title">
-                            <b>Mes étapes</b>
-                            <small>Je peux être présent·e à toute la sortie ou seulement à certaines étapes.</small>
+                        {hasMultipleSteps(event.places) && <><div className="organizer-stage-title">
+                            <b>Ma présence par étape</b>
+                            <small>Après tes dates, choisis les parties auxquelles tu participeras.</small>
                         </div>
                         <div className="stage-options">
                             {event.places.map((place, index) => {
@@ -244,7 +250,7 @@ export default function BimaManage({
                                     </button>
                                 )
                             })}
-                        </div>
+                        </div></>}
                         <Button
                             secondary
                             disabled={
@@ -339,11 +345,11 @@ export default function BimaManage({
                         </div>
                     </div>
 
-                    <div className="matrix-card stage-matrix-card">
+                    {hasMultipleSteps(event.places) && <div className="matrix-card stage-matrix-card">
                         <div className="matrix-head">
                             <div>
-                                <h2>Présence à chaque étape</h2>
-                                <p>Une personne peut rejoindre seulement une partie de la sortie.</p>
+                                <h2>Qui vient à quelle étape ?</h2>
+                                <p>Chacun peut participer à seulement une partie de la sortie.</p>
                             </div>
                         </div>
                         <div className="matrix-scroll">
@@ -380,7 +386,7 @@ export default function BimaManage({
                                 ))}
                             </div>
                         </div>
-                    </div>
+                    </div>}
 
                     {event.status === "confirmed" && (
                         <Confirmed
