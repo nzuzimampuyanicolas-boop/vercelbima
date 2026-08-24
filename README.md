@@ -64,7 +64,7 @@ L’identité réseau est hachée avec un secret serveur avant la création du c
 
 ## E-mail organisateur et récupération du lien
 
-L’e-mail est demandé uniquement à l’organisateur pendant la création. Il est stocké sur `bima_events` et sert à envoyer le lien privé, à générer un nouveau lien depuis `/recuperer-mon-lien` en cas de perte, et à permettre une demande ponctuelle de feedback. Les invités ne fournissent ni compte ni e-mail.
+L’e-mail de l’organisateur est demandé pendant la création. Il est stocké sur `bima_events` et sert à envoyer le lien privé, à générer un nouveau lien depuis `/recuperer-mon-lien` en cas de perte, et à permettre une demande ponctuelle de feedback. Les invités répondent toujours sans compte et sans e-mail. Après l’enregistrement du vote seulement, un invité peut facultativement laisser une adresse liée à cet événement précis afin de recevoir la date ou la période finale. Cette adresse n’est pas synchronisée avec la liste des mises à jour produit.
 
 La récupération ne révèle jamais si une adresse existe. La route publique transmet la demande au backend avec le secret serveur, génère de nouveaux liens courts hashés, puis les envoie via le Gmail déjà configuré. Les demandes sont limitées par réseau et par e-mail haché. L’adresse n’est pas inscrite à une liste marketing sans consentement supplémentaire explicite.
 

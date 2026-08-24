@@ -31,6 +31,27 @@ function cleanText(value: unknown, maxLength: number) {
   return typeof value === "string" ? value.trim().slice(0, maxLength) : ""
 }
 
+function cleanAttribution(body: Record<string, unknown>) {
+  const attribution = body.attribution
+  if (!attribution || typeof attribution !== "object" || Array.isArray(attribution)) {
+    return {
+      attribution_source: null,
+      attribution_medium: null,
+      attribution_campaign: null,
+      attribution_content: null,
+      attribution_referrer_host: null,
+    }
+  }
+  const values = attribution as Record<string, unknown>
+  return {
+    attribution_source: cleanText(values.source, 100) || null,
+    attribution_medium: cleanText(values.medium, 100) || null,
+    attribution_campaign: cleanText(values.campaign, 160) || null,
+    attribution_content: cleanText(values.content, 160) || null,
+    attribution_referrer_host: cleanText(values.referrerHost, 255) || null,
+  }
+}
+
 async function sha256(value: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("")
@@ -60,6 +81,8 @@ const rateLimitPolicies = {
   shortLinkRead: { scope: "short-link-read", limit: 120, windowSeconds: 60 },
   voteNetwork: { scope: "event-vote-network", limit: 100, windowSeconds: 600 },
   voteParticipant: { scope: "event-vote-participant", limit: 10, windowSeconds: 600 },
+  participantEmailNetwork: { scope: "participant-email-network", limit: 15, windowSeconds: 900 },
+  participantEmailIdentity: { scope: "participant-email-identity", limit: 5, windowSeconds: 3600 },
   organizerMutation: { scope: "organizer-mutation", limit: 30, windowSeconds: 600 },
   organizerInvalid: { scope: "organizer-invalid", limit: 5, windowSeconds: 900 },
   calendar: { scope: "calendar", limit: 30, windowSeconds: 600 },
@@ -71,6 +94,8 @@ const rateLimitPolicies = {
   recoveryNetwork: { scope: "management-recovery-network", limit: 5, windowSeconds: 900 },
   recoveryEmail: { scope: "management-recovery-email", limit: 3, windowSeconds: 3600 },
   recoveryEmailDaily: { scope: "management-recovery-email-daily", limit: 5, windowSeconds: 86400 },
+  productUpdateNetwork: { scope: "product-update-network", limit: 15, windowSeconds: 3600 },
+  productUpdateEmail: { scope: "product-update-email", limit: 3, windowSeconds: 86400 },
 } as const
 
 function constantTimeEqual(left: string, right: string) {
@@ -230,6 +255,112 @@ function makeSlug(title: string) {
 
 function assertDatabase(error: { message?: string } | null, fallback: string) {
   if (error) throw new Error(error.message || fallback)
+}
+
+async function syncProductUpdateContactToBrevo(email: string, firstName: string) {
+  const apiKey = Deno.env.get("BREVO_API_KEY")?.trim()
+  const listId = Number(Deno.env.get("BREVO_PRODUCT_UPDATES_LIST_ID"))
+
+  if (!apiKey || !Number.isSafeInteger(listId) || listId <= 0) {
+    throw new Error("Configuration Brevo indisponible.")
+  }
+
+  let response: Response
+  try {
+    response = await fetch("https://api.brevo.com/v3/contacts", {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "api-key": apiKey,
+      },
+      body: JSON.stringify({
+        email,
+        attributes: { PRENOM: firstName },
+        listIds: [listId],
+        updateEnabled: true,
+      }),
+      signal: AbortSignal.timeout(8_000),
+    })
+  } catch {
+    throw new Error("Brevo est temporairement indisponible.")
+  }
+
+  if (!response.ok) {
+    throw new Error(`Brevo a répondu avec le statut ${response.status}.`)
+  }
+}
+
+async function subscribeProductUpdates(request: Request) {
+  const body = await request.json().catch(() => ({}))
+  if (cleanText(body.website, 200)) return json({ error: "Requête invalide." }, 400)
+
+  const email = cleanText(body.email, 254).toLowerCase()
+  const firstName = cleanText(body.firstName, 80)
+  const source = cleanText(body.source, 80) || "landing-page"
+  if (body.consent !== true) {
+    return json({ error: "Confirme que tu souhaites recevoir les mises à jour de BIMA." }, 400)
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return json({ error: "Ajoute une adresse e-mail valide." }, 400)
+  }
+  if (!firstName) {
+    return json({ error: "Ajoute ton prénom." }, 400)
+  }
+
+  const emailKey = await sha256(email)
+  const emailPolicy = { ...rateLimitPolicies.productUpdateEmail, discriminator: emailKey }
+  const emailLimit = await consumeRateLimit(request, emailPolicy)
+  if (!emailLimit.allowed) return rateLimitResponse(emailLimit, emailPolicy)
+
+  const { data: subscriber, error } = await db
+    .from("bima_product_update_subscribers")
+    .upsert(
+      {
+        email,
+        first_name: firstName,
+        source,
+        last_subscribed_at: new Date().toISOString(),
+      },
+      { onConflict: "email" },
+    )
+    .select("id")
+    .single()
+  assertDatabase(error, "Impossible d’enregistrer cette adresse e-mail.")
+  if (!subscriber?.id) throw new Error("Impossible de retrouver cette inscription.")
+
+  const syncAttemptedAt = new Date().toISOString()
+  try {
+    await syncProductUpdateContactToBrevo(email, firstName)
+    const { error: statusError } = await db
+      .from("bima_product_update_subscribers")
+      .update({
+        brevo_sync_attempted_at: syncAttemptedAt,
+        brevo_synced_at: syncAttemptedAt,
+        brevo_sync_error: null,
+      })
+      .eq("id", subscriber.id)
+    if (statusError) {
+      console.error("Unable to save the successful Brevo synchronization status.")
+    }
+  } catch (syncError) {
+    const message = syncError instanceof Error
+      ? syncError.message.slice(0, 500)
+      : "Erreur Brevo inconnue."
+    const { error: statusError } = await db
+      .from("bima_product_update_subscribers")
+      .update({
+        brevo_sync_attempted_at: syncAttemptedAt,
+        brevo_sync_error: message,
+      })
+      .eq("id", subscriber.id)
+    if (statusError) {
+      console.error("Unable to save the failed Brevo synchronization status.")
+    }
+    console.error("Brevo product update synchronization failed.", { message })
+  }
+
+  return json({ ok: true, message: "C’est noté. On te tiendra au courant." }, 200)
 }
 
 async function findEvent(slug: string) {
@@ -436,6 +567,7 @@ async function createEvent(request: Request) {
   const budgetEur = rawBudget == null || !Number.isFinite(rawBudget) ? null : Math.max(10, Math.round(rawBudget / 10) * 10)
   const responseDeadline = typeof body.responseDeadline === "string" && body.responseDeadline ? body.responseDeadline.slice(0, 10) : null
   const eventType = body.eventType === "stay" ? "stay" : "outing"
+  const attribution = cleanAttribution(body)
   const places = Array.isArray(body.places) ? (body.places as CreatePlace[]).slice(0, 2) : []
   const dates = Array.isArray(body.dates)
     ? body.dates.slice(0, 4).map(normalizeCreateDate).filter((date: NormalizedDate | null): date is NormalizedDate => Boolean(date))
@@ -511,7 +643,7 @@ async function createEvent(request: Request) {
   try {
     const { error: eventError } = await db.from("bima_events").insert({
       id: eventId, slug, manage_token_hash: await sha256(manageToken), organizer_name: organizerName, organizer_email: organizerEmail,
-      title, city, max_places: maxPlaces, budget_eur: budgetEur, response_deadline: responseDeadline, event_type: eventType,
+      title, city, max_places: maxPlaces, budget_eur: budgetEur, response_deadline: responseDeadline, event_type: eventType, ...attribution,
       notify_new_responses: true, notify_reminders: true, notifications_started_at: now,
       created_at: now, updated_at: now,
     })
@@ -768,6 +900,70 @@ async function submitVote(request: Request, slug: string) {
   })
 }
 
+function normalizeEmail(value: unknown) {
+  return cleanText(value, 254).toLowerCase()
+}
+
+function validEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
+}
+
+async function saveParticipantConfirmationEmail(request: Request, slug: string) {
+  const body = await request.json()
+  const event = await findEvent(slug)
+  if (!event) return json({ error: "Cette sortie n’existe pas." }, 404)
+
+  const participantToken = cleanText(body.participantToken, 128)
+  const participantShortCode = cleanText(body.participantShortCode, 64)
+  const email = normalizeEmail(body.email)
+  if (!email || !validEmail(email)) {
+    return json({ error: "Entre une adresse e-mail valide." }, 400)
+  }
+
+  let participant: { id: string; role: string } | null = null
+  if (participantShortCode) {
+    const link = await findShortLink(participantShortCode, "participant")
+    if (link?.event_id === event.id && link.participant_id) {
+      const result = await db.from("bima_participants")
+        .select("id,role")
+        .eq("event_id", event.id)
+        .eq("id", link.participant_id)
+        .maybeSingle()
+      assertDatabase(result.error, "Impossible de retrouver ce participant.")
+      participant = result.data
+    }
+  } else if (participantToken) {
+    const result = await db.from("bima_participants")
+      .select("id,role")
+      .eq("event_id", event.id)
+      .eq("token_hash", await sha256(participantToken))
+      .maybeSingle()
+    assertDatabase(result.error, "Impossible de retrouver ce participant.")
+    participant = result.data
+  }
+
+  if (!participant || participant.role !== "guest") {
+    return json({ error: "Ce lien personnel est invalide." }, 403)
+  }
+
+  const now = new Date().toISOString()
+  const { error } = await db.from("bima_participants").update({
+    email,
+    confirmation_email_requested_at: now,
+    confirmation_email_claimed_at: null,
+    confirmation_email_sent_at: null,
+    confirmation_email_attempt_count: 0,
+    updated_at: now,
+  }).eq("id", participant.id).eq("event_id", event.id).eq("role", "guest")
+  assertDatabase(error, "Impossible d’enregistrer cet e-mail.")
+
+  return json({
+    ok: true,
+    eventType: event.event_type === "stay" ? "stay" : "outing",
+    alreadyConfirmed: Boolean(event.confirmed_date_id),
+  })
+}
+
 async function confirmDate(request: Request, slug: string) {
   const body = await request.json()
   const manageToken = cleanText(body.manageToken, 128)
@@ -946,6 +1142,112 @@ async function completeNotifications(request: Request, authorization?: boolean) 
   return json({ ok: true, processed: results.length })
 }
 
+async function claimParticipantConfirmations(request: Request, authorization?: boolean) {
+  const authorized = authorization ?? await hasNotificationAccess(request)
+  if (!authorized) return json({ error: "Accès refusé." }, 401)
+  const body = await request.json().catch(() => ({}))
+  const slug = cleanText(body.slug, 100)
+  if (!slug) return json({ error: "Sortie manquante." }, 400)
+
+  const event = await findEvent(slug)
+  if (!event) return json({ error: "Cette sortie n’existe pas." }, 404)
+  if (!event.confirmed_date_id) return json({ jobs: [] })
+
+  const [dateResult, placesResult] = await Promise.all([
+    db.from("bima_date_options")
+      .select("id,starts_at,ends_at")
+      .eq("event_id", event.id)
+      .eq("id", event.confirmed_date_id)
+      .maybeSingle(),
+    db.from("bima_places")
+      .select("position,name,address,maps_url")
+      .eq("event_id", event.id)
+      .order("position"),
+  ])
+  assertDatabase(dateResult.error, "Impossible de charger la date confirmée.")
+  assertDatabase(placesResult.error, "Impossible de charger le lieu confirmé.")
+  if (!dateResult.data) return json({ jobs: [] })
+
+  const now = new Date().toISOString()
+  const staleBefore = new Date(Date.now() - 15 * 60 * 1000).toISOString()
+  const staleResult = await db.from("bima_participants").update({
+    confirmation_email_claimed_at: null,
+  })
+    .eq("event_id", event.id)
+    .eq("role", "guest")
+    .is("confirmation_email_sent_at", null)
+    .lt("confirmation_email_claimed_at", staleBefore)
+  assertDatabase(staleResult.error, "Impossible de reprendre les confirmations interrompues.")
+
+  const candidatesResult = await db.from("bima_participants")
+    .select("id,name,email,confirmation_email_attempt_count")
+    .eq("event_id", event.id)
+    .eq("role", "guest")
+    .not("email", "is", null)
+    .not("confirmation_email_requested_at", "is", null)
+    .is("confirmation_email_sent_at", null)
+    .is("confirmation_email_claimed_at", null)
+    .lt("confirmation_email_attempt_count", 5)
+    .order("created_at")
+    .limit(50)
+  assertDatabase(candidatesResult.error, "Impossible de charger les confirmations à envoyer.")
+
+  const jobs = []
+  for (const candidate of candidatesResult.data || []) {
+    const attemptCount = Number(candidate.confirmation_email_attempt_count || 0)
+    const claimResult = await db.from("bima_participants").update({
+      confirmation_email_claimed_at: now,
+      confirmation_email_attempt_count: attemptCount + 1,
+      updated_at: now,
+    })
+      .eq("id", candidate.id)
+      .eq("event_id", event.id)
+      .eq("role", "guest")
+      .is("confirmation_email_sent_at", null)
+      .is("confirmation_email_claimed_at", null)
+      .select("id,name,email")
+      .maybeSingle()
+    assertDatabase(claimResult.error, "Impossible de réserver une confirmation.")
+    if (!claimResult.data?.email) continue
+    const participantShortCode = await createShortLink("participant", event.id, candidate.id)
+    jobs.push({
+      id: claimResult.data.id,
+      to: claimResult.data.email,
+      participantName: claimResult.data.name,
+      eventTitle: event.title,
+      eventType: event.event_type === "stay" ? "stay" : "outing",
+      startsAt: dateResult.data.starts_at,
+      endsAt: dateResult.data.ends_at,
+      places: placesResult.data || [],
+      participantPath: `/p/${encodeURIComponent(participantShortCode)}`,
+      calendarPath: `/api/events/${encodeURIComponent(event.slug)}/calendar`,
+    })
+  }
+  return json({ jobs })
+}
+
+async function completeParticipantConfirmations(request: Request, authorization?: boolean) {
+  const authorized = authorization ?? await hasNotificationAccess(request)
+  if (!authorized) return json({ error: "Accès refusé." }, 401)
+  const body = await request.json().catch(() => ({}))
+  const results = Array.isArray(body.results) ? body.results.slice(0, 50) : []
+  for (const result of results) {
+    const id = cleanText(result.id, 80)
+    if (!id || typeof result.sent !== "boolean") continue
+    const now = new Date().toISOString()
+    const update = result.sent
+      ? { confirmation_email_sent_at: now, confirmation_email_claimed_at: null, updated_at: now }
+      : { confirmation_email_claimed_at: null, updated_at: now }
+    const { error } = await db.from("bima_participants")
+      .update(update)
+      .eq("id", id)
+      .eq("role", "guest")
+      .not("confirmation_email_claimed_at", "is", null)
+    assertDatabase(error, "Impossible de finaliser une confirmation participant.")
+  }
+  return json({ ok: true, processed: results.length })
+}
+
 async function recoverManagementLinks(request: Request, authorization?: boolean) {
   const authorized = authorization ?? await hasNotificationAccess(request)
   if (!authorized) return json({ error: "Accès refusé." }, 401)
@@ -1063,10 +1365,10 @@ async function adminData(request: Request, authorization?: boolean) {
   const authorized = authorization ?? await isAdmin(request)
   if (!authorized) return json({ error: "Clé administrateur invalide." }, 401)
   const [eventsResult, placesResult, datesResult, participantsResult, votesResult, stageVotesResult] = await Promise.all([
-    db.from("bima_events").select("id,slug,title,organizer_name,organizer_email,city,max_places,budget_eur,response_deadline,confirmed_date_id,event_type,created_at,updated_at").order("created_at", { ascending: false }).limit(500),
+    db.from("bima_events").select("id,slug,title,organizer_name,organizer_email,city,max_places,budget_eur,response_deadline,confirmed_date_id,event_type,attribution_source,attribution_medium,attribution_campaign,attribution_content,attribution_referrer_host,created_at,updated_at").order("created_at", { ascending: false }).limit(500),
     db.from("bima_places").select("id,event_id,position,start_time,name,address,category,maps_url").order("position").limit(1000),
     db.from("bima_date_options").select("id,event_id,position,starts_at,ends_at").order("position").limit(2000),
-    db.from("bima_participants").select("id,event_id,name,role,created_at,updated_at").order("created_at", { ascending: false }).limit(2000),
+    db.from("bima_participants").select("id,event_id,name,email,role,confirmation_email_requested_at,confirmation_email_sent_at,created_at,updated_at").order("created_at", { ascending: false }).limit(2000),
     db.from("bima_date_votes").select("participant_id,date_option_id,available,updated_at").order("updated_at", { ascending: false }).limit(5000),
     db.from("bima_stage_votes").select("participant_id,place_id,attending,updated_at").order("updated_at", { ascending: false }).limit(5000),
   ])
@@ -1338,6 +1640,28 @@ async function voteRateLimited(
   })
 }
 
+async function participantEmailRateLimited(
+  request: Request,
+  slug: string,
+  operation: () => Promise<Response>,
+) {
+  const body = await request.clone().json().catch(() => ({}))
+  const personalCredential = cleanText(body.participantToken || body.participantShortCode, 128)
+  return await rateLimited(
+    request,
+    { ...rateLimitPolicies.participantEmailNetwork, discriminator: slug },
+    async () => {
+      if (!personalCredential) return await operation()
+      const participantKey = await sha256(`${slug}:${personalCredential}`)
+      return await rateLimited(
+        request,
+        { ...rateLimitPolicies.participantEmailIdentity, discriminator: participantKey },
+        operation,
+      )
+    },
+  )
+}
+
 async function adminRateLimited(
   request: Request,
   validPolicy: RateLimitPolicy,
@@ -1375,11 +1699,24 @@ Deno.serve(async (request: Request) => {
         rateLimited(request, rateLimitPolicies.createAttempt, () => createEvent(request))
       ))
     }
+    if (request.method === "POST" && route === "/api/product-updates") {
+      return await rateLimited(
+        request,
+        rateLimitPolicies.productUpdateNetwork,
+        () => subscribeProductUpdates(request),
+      )
+    }
     if (request.method === "POST" && route === "/api/notifications/process") {
       return await notificationRateLimited(request, (authorized) => processNotifications(request, authorized))
     }
     if (request.method === "POST" && route === "/api/notifications/complete") {
       return await notificationRateLimited(request, (authorized) => completeNotifications(request, authorized))
+    }
+    if (request.method === "POST" && route === "/api/participant-confirmations/claim") {
+      return await notificationRateLimited(request, (authorized) => claimParticipantConfirmations(request, authorized))
+    }
+    if (request.method === "POST" && route === "/api/participant-confirmations/complete") {
+      return await notificationRateLimited(request, (authorized) => completeParticipantConfirmations(request, authorized))
     }
     if (request.method === "POST" && route === "/api/recovery/manage") {
       return await notificationRateLimited(request, (authorized) => recoverManagementLinks(request, authorized))
@@ -1417,7 +1754,7 @@ Deno.serve(async (request: Request) => {
         ),
       )
     }
-    const match = route.match(/^\/api\/events\/([^/]+)(?:\/(votes|confirm|calendar|delete|notifications))?$/)
+    const match = route.match(/^\/api\/events\/([^/]+)(?:\/(votes|participant-email|confirm|calendar|delete|notifications))?$/)
     if (match) {
       const slug = decodeURIComponent(match[1])
       const action = match[2]
@@ -1444,6 +1781,13 @@ Deno.serve(async (request: Request) => {
           request,
           slug,
           () => submitVote(request, slug),
+        )
+      }
+      if (request.method === "POST" && action === "participant-email") {
+        return await participantEmailRateLimited(
+          request,
+          slug,
+          () => saveParticipantConfirmationEmail(request, slug),
         )
       }
       if (request.method === "POST" && action === "notifications") {

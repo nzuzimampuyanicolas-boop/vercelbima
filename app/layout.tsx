@@ -24,7 +24,7 @@ export const metadata: Metadata = {
       "max-video-preview": -1,
     },
   },
-  referrer: "no-referrer",
+  referrer: "strict-origin-when-cross-origin",
   icons: { icon: "/bima-logo.svg", shortcut: "/bima-logo.svg", apple: "/bima-logo.svg" },
   openGraph: {
     type: "website",

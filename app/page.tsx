@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { track } from "@vercel/analytics";
 import { getCapacityCount, hasMultipleSteps } from "./lib/event-metrics";
 
 type Mode = "home" | "create" | "share" | "respond" | "saved" | "manage" | "confirmed";
@@ -179,6 +180,24 @@ function absoluteUrl(path: string) {
 
 function eventSharePath(slug: string) {
   return `/e/${encodeURIComponent(slug)}`;
+}
+
+function currentAttribution() {
+  if (typeof window === "undefined") return {};
+  const query = new URLSearchParams(window.location.search);
+  let referrerHost = "";
+  try {
+    referrerHost = document.referrer ? new URL(document.referrer).hostname : "";
+  } catch {
+    referrerHost = "";
+  }
+  return {
+    source: query.get("utm_source") || "",
+    medium: query.get("utm_medium") || "",
+    campaign: query.get("utm_campaign") || "",
+    content: query.get("utm_content") || "",
+    referrerHost,
+  };
 }
 
 type BimaAppProps = {
@@ -397,6 +416,7 @@ export default function BimaApp({ initialEventSlug = "", initialManageShortCode 
         showToast("Ton vote organisateur est enregistré");
         setMode("manage");
       } else {
+        track("participant_response_completed", { event_type: updated.event.eventType });
         const personalPath = `/p/${encodeURIComponent(nextShortCode)}`;
         window.history.replaceState({}, "", personalPath);
         setMode("saved");
@@ -739,6 +759,7 @@ function CreatePage({
           budgetEur: budget ? Number(budget) : null,
           responseDeadline: deadline || null,
           website,
+          attribution: currentAttribution(),
           places: resolvedPlaces,
           dates: normalizedDates,
         }),
@@ -901,7 +922,7 @@ function RespondPage({ payload, name, setName, availableDateIds, setAvailableDat
         </section>}
         {error && <div className="form-error" role="alert">{error}</div>}
         <button className="primary full-button" onClick={() => void onSubmit()} disabled={busy}>{busy ? "Enregistrement…" : payload.me ? "Mettre à jour mes réponses" : "Valider mes réponses"} <span>→</span></button>
-        <p className="privacy">Aucun compte, aucun email. Ton lien personnel permet de modifier ta réponse.</p>
+        <p className="privacy">Aucun compte. L’e-mail n’est proposé qu’après ta réponse et reste facultatif.</p>
       </div>
     </section>
   );
@@ -909,7 +930,57 @@ function RespondPage({ payload, name, setName, availableDateIds, setAvailableDat
 
 function SavedPage({ payload, participantToken, participantShortCode, copied, onCopy }: { payload: EventResponse; participantToken: string; participantShortCode: string; copied: boolean; onCopy: (text: string, message?: string) => Promise<void> }) {
   const personalUrl = absoluteUrl(participantShortCode ? `/p/${encodeURIComponent(participantShortCode)}` : `/?event=${encodeURIComponent(payload.event.slug)}&participant=${encodeURIComponent(participantToken)}`);
-  return <section className="center-page compact"><div className="success-mark pop">✓</div><h2>C’est noté{payload.me?.name ? `, ${payload.me.name}` : ""} !</h2><p className="lead">{payload.event.organizerName} voit maintenant tes {payload.event.eventType === "stay" ? "périodes" : "dates"}{hasMultipleSteps(payload.event.places) ? " et les étapes choisies" : ""}.</p><div className="token-card"><span>TON LIEN PERSONNEL</span><p>{personalUrl}</p><button onClick={() => void onCopy(personalUrl, "Lien personnel copié")}>{copied ? "Copié" : "Copier"}</button></div><div className="notice warning"><span>★</span><p><b>Conserve ce lien.</b><br />Il permet de modifier tes réponses plus tard, même depuis un autre appareil.</p></div><a className="text-link share-link" href={personalUrl}>Modifier mes réponses →</a></section>;
+  const [email, setEmail] = useState("");
+  const [emailBusy, setEmailBusy] = useState(false);
+  const [emailError, setEmailError] = useState("");
+  const [emailSaved, setEmailSaved] = useState(false);
+  const isStay = payload.event.eventType === "stay";
+
+  const saveEmail = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setEmailBusy(true);
+    setEmailError("");
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(payload.event.slug)}/participant-email`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email, participantToken, participantShortCode }),
+      });
+      await readPayload<{ ok: true }>(response);
+      setEmailSaved(true);
+      track("participant_email_submitted", { event_type: payload.event.eventType });
+    } catch (reason) {
+      setEmailError(reason instanceof Error ? reason.message : "Impossible d’enregistrer cet e-mail.");
+    } finally {
+      setEmailBusy(false);
+    }
+  };
+
+  return <section className="center-page compact saved-page">
+    <div className="success-mark pop">✓</div>
+    <span className="step-label">RÉPONSE ENREGISTRÉE ! 🎉</span>
+    <h2>C’est noté{payload.me?.name ? `, ${payload.me.name}` : ""} !</h2>
+    <p className="lead">Tes disponibilités ont bien été envoyées à {payload.event.organizerName}.</p>
+
+    <section className="confirmation-email-card" aria-labelledby="confirmation-email-title">
+      {emailSaved ? <div className="confirmation-email-success" role="status"><span>✓</span><div><h3>C’est bon !</h3><p>Tu recevras un e-mail dès que {isStay ? "le séjour sera confirmé" : "la date finale sera choisie"}.</p></div></div> : <>
+        <span className="step-label">FACULTATIF</span>
+        <h3 id="confirmation-email-title">{isStay ? "Tu veux savoir quand le séjour sera confirmé ?" : "Tu veux savoir quand la sortie sera confirmée ?"}</h3>
+        <p>{isStay ? "Laisse ton e-mail et BIMA t’enverra la période finale dès que l’organisateur aura tranché." : "Laisse ton e-mail et BIMA t’enverra la date finale dès que l’organisateur aura tranché."}</p>
+        <form onSubmit={(event) => void saveEmail(event)} noValidate>
+          <label htmlFor="participant-confirmation-email">Ton e-mail <small>facultatif</small></label>
+          <div><input id="participant-confirmation-email" type="email" value={email} onChange={(input) => setEmail(input.target.value)} placeholder="toi@exemple.fr" autoComplete="email" required /><button className="primary" type="submit" disabled={emailBusy}>{emailBusy ? "Enregistrement…" : "Recevoir la confirmation"}</button></div>
+          {emailError && <p className="inline-error" role="alert">{emailError} Ta réponse reste bien enregistrée.</p>}
+          <small>Uniquement pour cette confirmation. Pas de newsletter, pas de spam.</small>
+        </form>
+      </>}
+    </section>
+
+    <div className="token-card"><span>TON LIEN PERSONNEL</span><p>{personalUrl}</p><button onClick={() => void onCopy(personalUrl, "Lien personnel copié")}>{copied ? "Copié" : "Copier"}</button></div>
+    <div className="notice warning"><span>★</span><p><b>Conserve ce lien.</b><br />Il permet de modifier tes réponses plus tard, même depuis un autre appareil.</p></div>
+    <a className="text-link share-link" href={personalUrl}>Modifier mes réponses →</a>
+    <section className="participant-create-card"><span>Une sortie à organiser de ton côté ?</span><a className="primary" href="/creer" onClick={() => track("participant_create_event_clicked", { event_type: payload.event.eventType })}>Créer ma sortie →</a></section>
+  </section>;
 }
 
 function EditEventPanel({ event, participantCount, busy, onCancel, onSave }: {

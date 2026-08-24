@@ -393,7 +393,7 @@ test("opens the creation flow from a stable landing-page CTA URL", async () => {
   assert.match(createPage, /index: false/);
 });
 
-test("recovers organizer management links without adding email to the guest flow", async () => {
+test("recovers organizer management links without adding email before the guest vote", async () => {
   const [
     app,
     recoveryPage,
@@ -441,9 +441,43 @@ test("recovers organizer management links without adding email to the guest flow
   assert.match(admin, /planned_date/);
   assert.match(admin, /feedback_status/);
   assert.match(admin, /Abandonnée/);
-  assert.match(privacy, /n’est pas demandée aux invités/);
+  assert.match(privacy, /Le participant n’a jamais besoin d’un e-mail pour répondre/);
   assert.match(privacy, /liste de diffusion marketing sans un consentement supplémentaire explicite/);
-  assert.match(readme, /Les invités ne fournissent ni compte ni e-mail/);
+  assert.match(readme, /Les invités répondent toujours sans compte et sans e-mail/);
+});
+
+test("offers an optional confirmation email only after a participant response", async () => {
+  const [app, route, processor, gmail, edgeApi, migration, admin, privacy] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/api/events/[slug]/participant-email/route.ts"),
+    source("app/lib/participant-confirmations.ts"),
+    source("app/lib/gmail.ts"),
+    source("supabase/functions/bima-api/index.ts"),
+    source("supabase/migrations/20260824184324_participant_confirmation_emails.sql"),
+    source("app/admin/page.tsx"),
+    source("app/confidentialite/page.tsx"),
+  ]);
+
+  const guestVote = app.slice(app.indexOf("function RespondPage"), app.indexOf("function SavedPage"));
+  const savedPage = app.slice(app.indexOf("function SavedPage"), app.indexOf("function EditEventPanel"));
+  assert.doesNotMatch(guestVote, /type="email"/);
+  assert.match(savedPage, /Recevoir la confirmation/);
+  assert.match(savedPage, /Uniquement pour cette confirmation\. Pas de newsletter, pas de spam/);
+  assert.match(savedPage, /participant_email_submitted/);
+  assert.match(app, /participant_response_completed/);
+  assert.match(app, /participant_create_event_clicked/);
+  assert.match(route, /processParticipantConfirmations/);
+  assert.match(processor, /participant-confirmations\/claim/);
+  assert.match(processor, /participant-confirmations\/complete/);
+  assert.match(gmail, /sendParticipantConfirmationEmail/);
+  assert.match(gmail, /Ajouter au calendrier/);
+  assert.match(edgeApi, /async function saveParticipantConfirmationEmail/);
+  assert.match(edgeApi, /participantEmailRateLimited/);
+  assert.match(edgeApi, /async function claimParticipantConfirmations/);
+  assert.match(migration, /confirmation_email_requested_at timestamptz/);
+  assert.match(migration, /confirmation_email_sent_at timestamptz/);
+  assert.match(admin, /E-mail de confirmation/);
+  assert.match(privacy, /n’est pas utilisée pour une newsletter/);
 });
 
 test("uses the white BIMA logo in every transactional email header", async () => {
@@ -453,7 +487,7 @@ test("uses the white BIMA logo in every transactional email header", async () =>
   assert.ok(logo.size > 0);
   assert.match(gmail, /EMAIL_LOGO_URL = `\$\{BIMA_PUBLIC_URL\}\/bima-logo-white\.png`/);
   assert.match(gmail, /<img src="\$\{EMAIL_LOGO_URL\}" alt="BIMA" width="54" height="54"/);
-  assert.equal(gmail.match(/\$\{emailHeader\(\)\}/g)?.length, 3);
+  assert.equal(gmail.match(/\$\{emailHeader\(\)\}/g)?.length, 4);
   assert.doesNotMatch(gmail, />BIMA <span style=/);
 });
 
@@ -469,4 +503,25 @@ test("collects Vercel traffic and performance statistics on every page", async (
   assert.match(layout, /import \{ SpeedInsights \} from "@vercel\/speed-insights\/next"/);
   assert.match(layout, /<Analytics \/>/);
   assert.match(layout, /<SpeedInsights \/>/);
+});
+
+test("attributes new BIMA creations without tracking participant identities", async () => {
+  const [page, admin, edgeApi, migration, handoff] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/admin/page.tsx"),
+    source("supabase/functions/bima-api/index.ts"),
+    source("supabase/migrations/20260822130101_add_event_attribution.sql"),
+    source("handoffs/site-vitrine/2026-08-22-pilotage-analytics-et-attribution.md"),
+  ]);
+
+  assert.match(page, /function currentAttribution\(\)/);
+  assert.match(page, /query\.get\("utm_source"\)/);
+  assert.match(page, /attribution: currentAttribution\(\)/);
+  assert.match(migration, /attribution_source text/i);
+  assert.match(migration, /idx_bima_events_attribution_source/i);
+  assert.match(edgeApi, /function cleanAttribution/);
+  assert.match(edgeApi, /attribution_referrer_host/);
+  assert.match(admin, /function Pilotage/);
+  assert.match(admin, /Créer → répondre → confirmer/);
+  assert.match(handoff, /utm_source=framer/);
 });

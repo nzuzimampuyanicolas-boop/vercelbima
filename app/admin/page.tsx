@@ -11,6 +11,7 @@ type SectionKey =
   | "votes"
   | "stageVotes"
   | "dates";
+type ViewKey = SectionKey | "pilotage";
 type DataRow = Record<string, unknown>;
 
 type AdminData = {
@@ -22,6 +23,13 @@ type AdminData = {
   participants: DataRow[];
   votes: DataRow[];
   stageVotes: DataRow[];
+};
+
+type ActivityPoint = {
+  label: string;
+  events: number;
+  guests: number;
+  votes: number;
 };
 
 type Column = {
@@ -87,8 +95,11 @@ const columns: Record<SectionKey, Column[]> = {
   ],
   participants: [
     { key: "name", label: "Participant" },
+    { key: "email", label: "E-mail de confirmation", kind: "email" },
     { key: "role", label: "Rôle", kind: "role" },
     { key: "event_title", label: "Sortie" },
+    { key: "confirmation_email_requested_at", label: "Demandé le", kind: "date" },
+    { key: "confirmation_email_sent_at", label: "Confirmation envoyée", kind: "date" },
     { key: "created_at", label: "Ajouté le", kind: "date" },
     { key: "updated_at", label: "Modifié le", kind: "date" },
   ],
@@ -184,6 +195,113 @@ function rowKey(section: SectionKey, row: DataRow) {
   return String(row.id || "");
 }
 
+function dateKey(value: unknown) {
+  const date = new Date(String(value || ""));
+  if (Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function monthLabel(key: string) {
+  const [year, month] = key.split("-").map(Number);
+  return new Intl.DateTimeFormat("fr-FR", { month: "short", year: "2-digit" })
+    .format(new Date(year, month - 1, 1))
+    .replace(".", "");
+}
+
+function recentMonths() {
+  const today = new Date();
+  return Array.from({ length: 6 }, (_, index) => {
+    const date = new Date(today.getFullYear(), today.getMonth() - (5 - index), 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+  });
+}
+
+function polyline(points: ActivityPoint[], key: keyof Omit<ActivityPoint, "label">) {
+  const max = Math.max(1, ...points.map((point) => point[key]));
+  return points.map((point, index) => {
+    const x = points.length === 1 ? 50 : (index / (points.length - 1)) * 100;
+    const y = 92 - (point[key] / max) * 78;
+    return `${x},${y}`;
+  }).join(" ");
+}
+
+function Pilotage({ data }: { data: AdminData }) {
+  const months = recentMonths();
+  const points = months.map((key) => ({ label: monthLabel(key), events: 0, guests: 0, votes: 0 }));
+  const pointByMonth = new Map(months.map((key, index) => [key, points[index]]));
+  const sourceCounts = new Map<string, number>();
+  const eventIdsWithGuest = new Set<string>();
+
+  for (const event of data.events) {
+    const point = pointByMonth.get(dateKey(event.created_at));
+    if (point) point.events += 1;
+    const source = String(event.attribution_source || event.attribution_referrer_host || "Direct / inconnu");
+    sourceCounts.set(source, (sourceCounts.get(source) || 0) + 1);
+  }
+  for (const participant of data.participants) {
+    if (participant.role !== "guest") continue;
+    const point = pointByMonth.get(dateKey(participant.created_at));
+    if (point) point.guests += 1;
+    eventIdsWithGuest.add(String(participant.event_id));
+  }
+  for (const vote of data.votes) {
+    const point = pointByMonth.get(dateKey(vote.updated_at));
+    if (point) point.votes += 1;
+  }
+
+  const confirmed = data.events.filter((event) => event.confirmed_date_id).length;
+  const sourcedEvents = data.events.filter((event) => event.attribution_source || event.attribution_referrer_host).length;
+  const sources = [...sourceCounts.entries()].sort((left, right) => right[1] - left[1]).slice(0, 5);
+  const maxSourceCount = Math.max(1, ...sources.map(([, count]) => count));
+  const distinctSources = new Set(data.events
+    .map((event) => event.attribution_source || event.attribution_referrer_host)
+    .filter(Boolean)).size;
+
+  return (
+    <section className="pilotage">
+      <div className="pilotage-heading">
+        <div><small>PILOTAGE BIMA</small><h2>Vue d&apos;ensemble</h2><p>Deux lectures distinctes : ce qui amène vers BIMA, puis ce qui devient une vraie sortie.</p></div>
+        <span className="private-pill">Accès privé</span>
+      </div>
+      <section className="dashboard-section acquisition-section">
+        <div className="section-heading"><div><span className="eyebrow">ACQUISITION</span><h3>Ce qui amène vers BIMA</h3><p>Sources et campagnes qui conduisent à une création de sortie.</p></div></div>
+        <div className="pilotage-kpis acquisition-kpis">
+          <article><small>CRÉATIONS ATTRIBUÉES</small><strong>{sourcedEvents}</strong><span>source ou référent détecté</span></article>
+          <article><small>SOURCES DISTINCTES</small><strong>{distinctSources}</strong><span>canaux identifiés</span></article>
+          <article><small>CRÉATIONS SANS SOURCE</small><strong>{Math.max(0, data.events.length - sourcedEvents)}</strong><span>directes ou historiques</span></article>
+        </div>
+        <article className="source-card">
+          <span className="eyebrow">ORIGINE DES CRÉATIONS</span><h3>D&apos;où viennent-elles ?</h3>
+          {sources.map(([source, count]) => <div className="source-row" key={source}><span>{source}</span><b>{count}</b><i><em style={{ width: `${(count / maxSourceCount) * 100}%` }} /></i></div>)}
+          {!sourcedEvents && <p className="source-empty">Quand les CTA Framer utilisent <code>utm_source=framer</code>, les prochaines créations seront attribuées ici.</p>}
+        </article>
+      </section>
+      <section className="dashboard-section sorties-section">
+        <div className="section-heading"><div><span className="eyebrow">SORTIES</span><h3>Ce qui se passe réellement dans BIMA</h3><p>Le cœur du produit : créer, recueillir les réponses et confirmer.</p></div></div>
+        <div className="pilotage-kpis sorties-kpis">
+          <article><small>SORTIES CRÉÉES</small><strong>{data.events.length}</strong><span>depuis le début</span></article>
+          <article><small>SORTIES AVEC RÉPONSE</small><strong>{eventIdsWithGuest.size}</strong><span>{data.events.length ? `${Math.round((eventIdsWithGuest.size / data.events.length) * 100)} % des créations` : "en attente de premières réponses"}</span></article>
+          <article><small>SORTIES CONFIRMÉES</small><strong>{confirmed}</strong><span>{data.events.length ? `${Math.round((confirmed / data.events.length) * 100)} % des créations` : "pas encore de sortie"}</span></article>
+        </div>
+        <div className="pilotage-grid">
+          <article className="chart-card">
+            <div><span className="eyebrow">ACTIVITÉ · 6 DERNIERS MOIS</span><h3>Créations, réponses et disponibilités</h3></div>
+            <svg viewBox="0 0 100 100" role="img" aria-label="Courbes des créations, réponses invitées et disponibilités">
+              <line x1="0" y1="92" x2="100" y2="92" className="chart-grid" />
+              <polyline points={polyline(points, "events")} className="chart-line chart-events" />
+              <polyline points={polyline(points, "guests")} className="chart-line chart-guests" />
+              <polyline points={polyline(points, "votes")} className="chart-line chart-votes" />
+            </svg>
+            <div className="chart-labels">{points.map((point) => <span key={point.label}>{point.label}</span>)}</div>
+            <div className="legend"><span><i className="chart-events" />Créées</span><span><i className="chart-guests" />Invités</span><span><i className="chart-votes" />Disponibilités</span></div>
+          </article>
+          <div className="funnel-card"><div><span className="eyebrow">TUNNEL PRODUIT</span><h3>Créer → répondre → confirmer</h3></div><ol><li><b>{data.events.length}</b><span>sorties créées</span></li><li><b>{eventIdsWithGuest.size}</b><span>avec une réponse invitée</span></li><li><b>{confirmed}</b><span>confirmées</span></li></ol></div>
+        </div>
+      </section>
+    </section>
+  );
+}
+
 /**
  * @framerSupportedLayoutWidth any
  * @framerSupportedLayoutHeight auto
@@ -193,7 +311,7 @@ function rowKey(section: SectionKey, row: DataRow) {
 export default function AdminPage() {
   const [token, setToken] = useState("");
   const [data, setData] = useState<AdminData | null>(null);
-  const [active, setActive] = useState<SectionKey>("events");
+  const [active, setActive] = useState<ViewKey>("pilotage");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState("");
@@ -254,6 +372,7 @@ export default function AdminPage() {
   }, [data, token]);
 
   async function deleteRow(row: DataRow) {
+    if (active === "pilotage") return;
     const selectedRowKey = rowKey(active, row);
     const label = String(row.title || row.name || row.participant_name || current.singular).trim();
     const warning = active === "events"
@@ -298,7 +417,7 @@ export default function AdminPage() {
   }
 
   const rows = useMemo(() => {
-    if (!data) return [];
+    if (!data || active === "pilotage") return [];
     const source = data[active] as DataRow[];
     const normalized = query.trim().toLocaleLowerCase("fr");
     if (!normalized) return source;
@@ -311,7 +430,9 @@ export default function AdminPage() {
     );
   }, [active, data, query]);
 
-  const current = sections.find((section) => section.key === active)!;
+  const current = active === "pilotage"
+    ? { key: "pilotage", label: "Pilotage", singular: "Pilotage", icon: "⌁" }
+    : sections.find((section) => section.key === active)!;
 
   if (!data) {
     return (
@@ -361,6 +482,16 @@ export default function AdminPage() {
           <Image src="/bima-logo.svg" alt="" width={44} height={44} priority />
           <span>BIMA</span>
         </Link>
+        <button
+          className={`pilotage-nav ${active === "pilotage" ? "active" : ""}`}
+          onClick={() => {
+            setActive("pilotage");
+            setQuery("");
+          }}
+        >
+          <span>⌁</span>
+          <b>Pilotage</b>
+        </button>
         <div className="side-title">
           <span>▦</span>
           <b>Données</b>
@@ -393,20 +524,21 @@ export default function AdminPage() {
             <h1>{current.label}</h1>
           </div>
           <div className="top-actions">
-            <label className="search">
+            {active !== "pilotage" && <label className="search">
               <span>⌕</span>
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={`Rechercher dans ${current.label.toLowerCase()}…`}
               />
-            </label>
+            </label>}
             <button onClick={() => void loadData(token)} disabled={loading}>
               {loading ? "Actualisation…" : "Actualiser"}
             </button>
           </div>
         </header>
 
+        {active === "pilotage" ? <Pilotage data={data} /> : <>
         <div className="summary-grid">
           <article>
             <small>SORTIES</small>
@@ -474,6 +606,7 @@ export default function AdminPage() {
             )}
           </div>
         </section>
+        </>}
       </section>
     </main>
   );
@@ -486,8 +619,9 @@ body{background:var(--bima-bg);color:var(--bima-text)}
 .brand{display:inline-flex;align-items:center;gap:10px;color:var(--bima-text);font-size:14px;letter-spacing:.11em;text-decoration:none}.brand img{width:44px;height:44px;object-fit:contain}.brand span{color:inherit}
 .login-page{background:radial-gradient(circle at 15% 20%,rgba(242,150,120,.24),transparent 30%),radial-gradient(circle at 85% 80%,rgba(20,84,93,.12),transparent 28%),var(--bima-bg)}
 .login-card{background:#fffdfa;border-color:var(--bima-line);box-shadow:0 28px 80px rgba(20,84,93,.13)}.lock-mark{background:var(--bima-nav)}.login-card>small,.topbar small{color:var(--bima-cta)}.login-card p,.privacy-note{color:var(--bima-muted)!important}.login-card input{border-color:var(--bima-line);background:var(--bima-paper)}.login-card input:focus{border-color:var(--bima-cta);box-shadow:0 0 0 3px rgba(217,95,59,.13)}.login-card button,.top-actions>button{background:var(--bima-cta)}
-.sidebar{background:var(--bima-nav-dark)}.sidebar .brand{display:flex;color:white}.sidebar nav button:hover,.sidebar nav button.active{background:var(--bima-nav)}.sidebar nav button.active>span{background:var(--bima-cta);border-color:var(--bima-accent)}.sidebar nav button.active em{background:var(--bima-yellow);color:var(--bima-text)}
+.sidebar{background:var(--bima-nav-dark)}.sidebar .brand{display:flex;color:white}.pilotage-nav{width:100%;display:grid;grid-template-columns:30px 1fr;align-items:center;gap:8px;margin:0 0 28px;padding:13px 12px;border:1px solid rgba(242,150,120,.45);border-radius:11px;background:rgba(242,150,120,.1);color:white;text-align:left;cursor:pointer}.pilotage-nav>span{width:28px;height:28px;display:grid;place-items:center;border-radius:8px;background:var(--bima-cta);font-size:16px}.pilotage-nav b{font-size:14px}.pilotage-nav:hover,.pilotage-nav.active{background:var(--bima-cta);border-color:var(--bima-cta)}.pilotage-nav.active>span{background:white;color:var(--bima-cta)}.sidebar nav button:hover,.sidebar nav button.active{background:var(--bima-nav)}.sidebar nav button.active>span{background:var(--bima-cta);border-color:var(--bima-accent)}.sidebar nav button.active em{background:var(--bima-yellow);color:var(--bima-text)}
 .search,.summary-grid article,.table-card{background:#fffdfa;border-color:var(--bima-line)}.summary-grid article:nth-child(2){border-top:3px solid var(--bima-nav)}.summary-grid article:nth-child(3){border-top:3px solid var(--bima-accent)}.summary-grid article:nth-child(4){border-top:3px solid var(--bima-yellow)}.summary-grid article:first-child{border-top:3px solid var(--bima-cta)}
 .summary-grid small,.summary-grid span,.table-heading p,.table-heading>span,.empty-state{color:var(--bima-muted)}th{background:var(--bima-paper);color:var(--bima-muted)}td{border-color:#ede1d6}tbody tr:hover{background:rgba(234,216,200,.25)}td a{color:var(--bima-cta)}.badge.success,.answer.yes{background:rgba(20,84,93,.12);color:var(--bima-nav)}.badge.pending,.badge.feedback-upcoming{background:rgba(244,185,66,.25);color:#77530c}.badge.abandoned{background:#eee9e2;color:#77736c}.badge.feedback-ready{background:rgba(217,95,59,.14);color:#a33d25}.badge.feedback-wait{background:rgba(242,150,120,.17);color:#8c402a}.badge.feedback-none{background:transparent;color:var(--bima-muted)}.answer.no{background:var(--bima-paper);color:var(--bima-muted)}.role{background:rgba(242,150,120,.18);color:#8c402a}.delete-row{border:1px solid rgba(217,95,59,.35);border-radius:999px;background:#fff0ed;color:#a93b25;padding:7px 11px;font:inherit;font-size:11px;font-weight:800;cursor:pointer}.delete-row:hover{background:#ffe3dc}.delete-row:disabled{opacity:.5;cursor:wait}.table-message{padding:11px 26px;border-bottom:1px solid var(--bima-line);font-size:12px;font-weight:700}.table-message.success{background:rgba(20,84,93,.08);color:var(--bima-nav)}.table-message.error{background:#fff0ed;color:#a93b25}
-@media(max-width:1050px){.sidebar .brand span{display:none}.sidebar .brand img{width:42px;height:42px}}@media(max-width:720px){.sidebar .brand{display:inline-flex}.sidebar .brand span{display:inline}.sidebar .brand img{width:40px;height:40px}}
+@media(max-width:1050px){.sidebar .brand span{display:none}.sidebar .brand img{width:42px;height:42px}.pilotage-nav{grid-template-columns:1fr;padding:9px;margin:0 auto 28px;width:46px}.pilotage-nav>span{margin:auto}.pilotage-nav b{display:none}}@media(max-width:720px){.sidebar .brand{display:inline-flex}.sidebar .brand span{display:inline}.sidebar .brand img{width:40px;height:40px}.pilotage-nav{display:inline-grid;grid-template-columns:30px 1fr;width:auto;margin:0 0 0 18px;padding:8px 11px;vertical-align:top}.pilotage-nav b{display:block}.pilotage-nav>span{margin:0}.sidebar nav{margin-top:14px}}
+.pilotage{margin:0 0 26px}.pilotage-heading{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;margin-bottom:22px}.pilotage-heading small,.eyebrow{font-size:10px;font-weight:900;letter-spacing:.13em;color:var(--bima-cta)}.pilotage-heading h2{font-size:25px;letter-spacing:-.04em;margin:5px 0}.pilotage-heading p,.section-heading p{margin:0;color:var(--bima-muted);font-size:13px;max-width:670px}.private-pill{padding:7px 10px;border-radius:99px;background:rgba(20,84,93,.1);font-size:11px;font-weight:850;color:var(--bima-nav);white-space:nowrap}.dashboard-section{padding:22px 0;border-top:1px solid var(--bima-line)}.dashboard-section:first-of-type{border-top:0;padding-top:0}.section-heading{margin-bottom:14px}.section-heading h3{font-size:22px;letter-spacing:-.04em;margin:5px 0}.pilotage-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px}.acquisition-kpis,.sorties-kpis{grid-template-columns:repeat(3,minmax(0,1fr))}.pilotage-kpis article,.chart-card,.source-card,.funnel-card{background:#fffdfa;border:1px solid var(--bima-line);border-radius:17px}.pilotage-kpis article{padding:17px}.pilotage-kpis small{display:block;font-size:9px;font-weight:900;color:var(--bima-muted);letter-spacing:.1em}.pilotage-kpis strong{display:block;font-size:32px;line-height:1;margin:9px 0 5px;letter-spacing:-.05em}.pilotage-kpis span{font-size:11px;color:var(--bima-muted)}.pilotage-grid{display:grid;grid-template-columns:1.42fr 1fr;gap:12px}.chart-card,.source-card{padding:20px}.chart-card h3,.source-card h3,.funnel-card h3{font-size:18px;letter-spacing:-.03em;margin:5px 0 12px}.chart-card svg{width:100%;height:145px;overflow:visible}.chart-grid{stroke:#e4dcd3;stroke-width:.8}.chart-line{fill:none;stroke-width:2.8;stroke-linecap:round;stroke-linejoin:round}.chart-events{stroke:var(--bima-cta)}.chart-guests{stroke:var(--bima-nav)}.chart-votes{stroke:var(--bima-yellow)}.chart-labels{display:flex;justify-content:space-between;color:var(--bima-muted);font-size:10px}.legend{display:flex;gap:16px;margin-top:16px;font-size:11px;color:var(--bima-muted)}.legend span{display:flex;align-items:center;gap:5px}.legend i{display:inline-block;width:12px;border-top:3px solid}.source-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;margin:12px 0}.source-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.source-row b{font-size:12px}.source-row>i{grid-column:1/-1;height:7px;border-radius:99px;background:var(--bima-paper);overflow:hidden}.source-row em{display:block;height:100%;border-radius:inherit;background:var(--bima-cta)}.source-empty{font-size:12px;line-height:1.45;color:var(--bima-muted);margin:18px 0 0}.source-empty code{font-size:11px;color:var(--bima-nav)}.funnel-card{display:flex;justify-content:space-between;align-items:center;gap:22px;margin:0;padding:18px 20px}.funnel-card h3{margin-bottom:0}.funnel-card ol{display:flex;list-style:none;padding:0;margin:0;gap:0}.funnel-card li{display:grid;gap:3px;min-width:100px;padding:0 12px;border-left:1px solid var(--bima-line)}.funnel-card b{font-size:24px;letter-spacing:-.05em}.funnel-card span{font-size:11px;color:var(--bima-muted)}@media(max-width:900px){.pilotage-kpis,.acquisition-kpis,.sorties-kpis{grid-template-columns:repeat(2,1fr)}.pilotage-grid{grid-template-columns:1fr}.funnel-card{align-items:flex-start;flex-direction:column}.funnel-card ol{width:100%;justify-content:space-between}}@media(max-width:520px){.pilotage-heading{flex-direction:column}.pilotage-kpis,.acquisition-kpis,.sorties-kpis{gap:8px}.pilotage-kpis article{padding:14px}.funnel-card ol{display:grid;grid-template-columns:repeat(3,1fr)}.funnel-card li{min-width:0;padding:0 8px}.funnel-card li:first-child{border-left:0}.legend{gap:10px;flex-wrap:wrap}}
 `;

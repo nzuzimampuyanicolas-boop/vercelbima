@@ -13,13 +13,13 @@ export async function POST(
   context: { params: Promise<{ slug: string }> },
 ) {
   const { slug } = await context.params;
-  const response = await proxyBima(request, `/api/events/${encodeURIComponent(slug)}/confirm`);
+  const response = await proxyBima(request, `/api/events/${encodeURIComponent(slug)}/participant-email`);
   if (response.ok) {
     after(async () => {
       try {
         await processParticipantConfirmations(slug);
       } catch (error) {
-        console.error("BIMA participant confirmation after event confirmation failed", error instanceof Error ? error.message : error);
+        console.error("BIMA participant confirmation after email opt-in failed", error instanceof Error ? error.message : error);
       }
     });
   }
