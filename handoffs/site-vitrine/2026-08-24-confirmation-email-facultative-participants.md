@@ -6,18 +6,11 @@ URL publique à tester : https://bima-app-sigma.vercel.app/
 
 ## Changement terminé
 
-Après avoir enregistré ses disponibilités, un participant peut désormais laisser facultativement son adresse e-mail pour recevoir la confirmation finale de la sortie ou du séjour.
+Après avoir enregistré ses disponibilités, un participant peut désormais laisser facultativement son adresse e-mail afin que BIMA puisse le prévenir de la confirmation finale de la sortie ou du séjour.
 
 Le vote reste inchangé : l’invité répond toujours sans compte et sans e-mail. Le champ apparaît uniquement sur l’écran de succès, après l’enregistrement de la réponse. Une erreur d’e-mail ne peut donc pas annuler le vote.
 
-Lorsque l’organisateur confirme la date ou la période, BIMA envoie au participant inscrit :
-
-- le nom de la sortie ou du séjour ;
-- la date ou la période finale ;
-- le ou les lieux ;
-- les liens Google Maps disponibles ;
-- le bouton d’ajout au calendrier ;
-- son lien personnel vers les détails.
+Cette livraison couvre la collecte et le stockage de l’adresse. L’envoi automatique de la confirmation n’est pas encore branché et ne doit pas être annoncé comme disponible.
 
 ## Bénéfice utilisateur
 
@@ -29,7 +22,7 @@ Cette évolution renforce le cycle produit BIMA : créer → partager → répon
 
 Dans une section présentant l’étape de confirmation ou les bénéfices participants, ajouter une formulation courte comme :
 
-> Une fois la date choisie, les invités qui le souhaitent reçoivent la confirmation et peuvent l’ajouter à leur calendrier.
+> Après leur réponse, les invités peuvent choisir de laisser leur e-mail pour être prévenus de la confirmation.
 
 Si une démonstration du parcours invité est présente, montrer que :
 
@@ -47,7 +40,8 @@ Ajouter près de la promesse « réponse en 20 secondes » une précision discr�
 
 - Ne pas présenter cette adresse comme une inscription à une newsletter.
 - Ne pas dire que l’organisateur récupère les e-mails des invités : l’adresse reste une donnée fonctionnelle privée de BIMA.
-- Ne pas promettre de rappels automatiques supplémentaires aux participants ; seule la confirmation finale est actuellement envoyée.
+- Ne pas dire que l’e-mail de confirmation est déjà envoyé automatiquement : cette livraison prépare la collecte, pas encore l’envoi.
+- Ne pas promettre de rappels automatiques supplémentaires aux participants.
 - Ne pas annoncer une fonctionnalité de compte participant.
 
 ## Vérifications réalisées
@@ -56,7 +50,6 @@ Ajouter près de la promesse « réponse en 20 secondes » une précision discr�
 - champ e-mail absent avant le vote dans le parcours participant ;
 - endpoint public séparé du vote et protégé par limitation de requêtes ;
 - stockage Supabase facultatif et rétrocompatible ;
-- envoi final idempotent avec reprise en cas d’échec ;
-- e-mail visible dans l’administration privée ;
+- stockage indépendant du vote, prêt pour un futur envoi fonctionnel ;
 - analytics produits sans adresse e-mail ni identité participant ;
 - build Next.js réussi et 23 tests sur 23 validés.

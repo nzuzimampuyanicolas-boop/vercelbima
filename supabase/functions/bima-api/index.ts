@@ -917,7 +917,7 @@ async function saveParticipantConfirmationEmail(request: Request, slug: string) 
   const participantShortCode = cleanText(body.participantShortCode, 64)
   const email = normalizeEmail(body.email)
   if (!email || !validEmail(email)) {
-    return json({ error: "Entre une adresse e-mail valide." }, 400)
+    return json({ error: "L’adresse e-mail semble incorrecte." }, 400)
   }
 
   let participant: { id: string; role: string } | null = null
@@ -1142,112 +1142,6 @@ async function completeNotifications(request: Request, authorization?: boolean) 
   return json({ ok: true, processed: results.length })
 }
 
-async function claimParticipantConfirmations(request: Request, authorization?: boolean) {
-  const authorized = authorization ?? await hasNotificationAccess(request)
-  if (!authorized) return json({ error: "Accès refusé." }, 401)
-  const body = await request.json().catch(() => ({}))
-  const slug = cleanText(body.slug, 100)
-  if (!slug) return json({ error: "Sortie manquante." }, 400)
-
-  const event = await findEvent(slug)
-  if (!event) return json({ error: "Cette sortie n’existe pas." }, 404)
-  if (!event.confirmed_date_id) return json({ jobs: [] })
-
-  const [dateResult, placesResult] = await Promise.all([
-    db.from("bima_date_options")
-      .select("id,starts_at,ends_at")
-      .eq("event_id", event.id)
-      .eq("id", event.confirmed_date_id)
-      .maybeSingle(),
-    db.from("bima_places")
-      .select("position,name,address,maps_url")
-      .eq("event_id", event.id)
-      .order("position"),
-  ])
-  assertDatabase(dateResult.error, "Impossible de charger la date confirmée.")
-  assertDatabase(placesResult.error, "Impossible de charger le lieu confirmé.")
-  if (!dateResult.data) return json({ jobs: [] })
-
-  const now = new Date().toISOString()
-  const staleBefore = new Date(Date.now() - 15 * 60 * 1000).toISOString()
-  const staleResult = await db.from("bima_participants").update({
-    confirmation_email_claimed_at: null,
-  })
-    .eq("event_id", event.id)
-    .eq("role", "guest")
-    .is("confirmation_email_sent_at", null)
-    .lt("confirmation_email_claimed_at", staleBefore)
-  assertDatabase(staleResult.error, "Impossible de reprendre les confirmations interrompues.")
-
-  const candidatesResult = await db.from("bima_participants")
-    .select("id,name,email,confirmation_email_attempt_count")
-    .eq("event_id", event.id)
-    .eq("role", "guest")
-    .not("email", "is", null)
-    .not("confirmation_email_requested_at", "is", null)
-    .is("confirmation_email_sent_at", null)
-    .is("confirmation_email_claimed_at", null)
-    .lt("confirmation_email_attempt_count", 5)
-    .order("created_at")
-    .limit(50)
-  assertDatabase(candidatesResult.error, "Impossible de charger les confirmations à envoyer.")
-
-  const jobs = []
-  for (const candidate of candidatesResult.data || []) {
-    const attemptCount = Number(candidate.confirmation_email_attempt_count || 0)
-    const claimResult = await db.from("bima_participants").update({
-      confirmation_email_claimed_at: now,
-      confirmation_email_attempt_count: attemptCount + 1,
-      updated_at: now,
-    })
-      .eq("id", candidate.id)
-      .eq("event_id", event.id)
-      .eq("role", "guest")
-      .is("confirmation_email_sent_at", null)
-      .is("confirmation_email_claimed_at", null)
-      .select("id,name,email")
-      .maybeSingle()
-    assertDatabase(claimResult.error, "Impossible de réserver une confirmation.")
-    if (!claimResult.data?.email) continue
-    const participantShortCode = await createShortLink("participant", event.id, candidate.id)
-    jobs.push({
-      id: claimResult.data.id,
-      to: claimResult.data.email,
-      participantName: claimResult.data.name,
-      eventTitle: event.title,
-      eventType: event.event_type === "stay" ? "stay" : "outing",
-      startsAt: dateResult.data.starts_at,
-      endsAt: dateResult.data.ends_at,
-      places: placesResult.data || [],
-      participantPath: `/p/${encodeURIComponent(participantShortCode)}`,
-      calendarPath: `/api/events/${encodeURIComponent(event.slug)}/calendar`,
-    })
-  }
-  return json({ jobs })
-}
-
-async function completeParticipantConfirmations(request: Request, authorization?: boolean) {
-  const authorized = authorization ?? await hasNotificationAccess(request)
-  if (!authorized) return json({ error: "Accès refusé." }, 401)
-  const body = await request.json().catch(() => ({}))
-  const results = Array.isArray(body.results) ? body.results.slice(0, 50) : []
-  for (const result of results) {
-    const id = cleanText(result.id, 80)
-    if (!id || typeof result.sent !== "boolean") continue
-    const now = new Date().toISOString()
-    const update = result.sent
-      ? { confirmation_email_sent_at: now, confirmation_email_claimed_at: null, updated_at: now }
-      : { confirmation_email_claimed_at: null, updated_at: now }
-    const { error } = await db.from("bima_participants")
-      .update(update)
-      .eq("id", id)
-      .eq("role", "guest")
-      .not("confirmation_email_claimed_at", "is", null)
-    assertDatabase(error, "Impossible de finaliser une confirmation participant.")
-  }
-  return json({ ok: true, processed: results.length })
-}
-
 async function recoverManagementLinks(request: Request, authorization?: boolean) {
   const authorized = authorization ?? await hasNotificationAccess(request)
   if (!authorized) return json({ error: "Accès refusé." }, 401)
@@ -1368,7 +1262,7 @@ async function adminData(request: Request, authorization?: boolean) {
     db.from("bima_events").select("id,slug,title,organizer_name,organizer_email,city,max_places,budget_eur,response_deadline,confirmed_date_id,event_type,attribution_source,attribution_medium,attribution_campaign,attribution_content,attribution_referrer_host,created_at,updated_at").order("created_at", { ascending: false }).limit(500),
     db.from("bima_places").select("id,event_id,position,start_time,name,address,category,maps_url").order("position").limit(1000),
     db.from("bima_date_options").select("id,event_id,position,starts_at,ends_at").order("position").limit(2000),
-    db.from("bima_participants").select("id,event_id,name,email,role,confirmation_email_requested_at,confirmation_email_sent_at,created_at,updated_at").order("created_at", { ascending: false }).limit(2000),
+    db.from("bima_participants").select("id,event_id,name,role,created_at,updated_at").order("created_at", { ascending: false }).limit(2000),
     db.from("bima_date_votes").select("participant_id,date_option_id,available,updated_at").order("updated_at", { ascending: false }).limit(5000),
     db.from("bima_stage_votes").select("participant_id,place_id,attending,updated_at").order("updated_at", { ascending: false }).limit(5000),
   ])
@@ -1711,12 +1605,6 @@ Deno.serve(async (request: Request) => {
     }
     if (request.method === "POST" && route === "/api/notifications/complete") {
       return await notificationRateLimited(request, (authorized) => completeNotifications(request, authorized))
-    }
-    if (request.method === "POST" && route === "/api/participant-confirmations/claim") {
-      return await notificationRateLimited(request, (authorized) => claimParticipantConfirmations(request, authorized))
-    }
-    if (request.method === "POST" && route === "/api/participant-confirmations/complete") {
-      return await notificationRateLimited(request, (authorized) => completeParticipantConfirmations(request, authorized))
     }
     if (request.method === "POST" && route === "/api/recovery/manage") {
       return await notificationRateLimited(request, (authorized) => recoverManagementLinks(request, authorized))

@@ -958,15 +958,14 @@ function SavedPage({ payload, participantToken, participantShortCode, copied, on
 
   return <section className="center-page compact saved-page">
     <div className="success-mark pop">✓</div>
-    <span className="step-label">RÉPONSE ENREGISTRÉE ! 🎉</span>
-    <h2>C’est noté{payload.me?.name ? `, ${payload.me.name}` : ""} !</h2>
-    <p className="lead">Tes disponibilités ont bien été envoyées à {payload.event.organizerName}.</p>
+    <h2>Réponse enregistrée ! 🎉</h2>
+    <p className="lead">Tes disponibilités ont bien été envoyées à l’organisateur.</p>
 
     <section className="confirmation-email-card" aria-labelledby="confirmation-email-title">
-      {emailSaved ? <div className="confirmation-email-success" role="status"><span>✓</span><div><h3>C’est bon !</h3><p>Tu recevras un e-mail dès que {isStay ? "le séjour sera confirmé" : "la date finale sera choisie"}.</p></div></div> : <>
+      {emailSaved ? <div className="confirmation-email-success" role="status"><span>✓</span><div><h3>Parfait !</h3><p>On te préviendra quand {isStay ? "le séjour sera confirmé" : "la sortie sera confirmée"}.</p></div></div> : <>
         <span className="step-label">FACULTATIF</span>
         <h3 id="confirmation-email-title">{isStay ? "Tu veux savoir quand le séjour sera confirmé ?" : "Tu veux savoir quand la sortie sera confirmée ?"}</h3>
-        <p>{isStay ? "Laisse ton e-mail et BIMA t’enverra la période finale dès que l’organisateur aura tranché." : "Laisse ton e-mail et BIMA t’enverra la date finale dès que l’organisateur aura tranché."}</p>
+        <p>{isStay ? "Laisse ton e-mail et on te préviendra lorsque l’organisateur aura choisi la période finale." : "Laisse ton e-mail et on te préviendra lorsque l’organisateur aura choisi la date finale."}</p>
         <form onSubmit={(event) => void saveEmail(event)} noValidate>
           <label htmlFor="participant-confirmation-email">Ton e-mail <small>facultatif</small></label>
           <div><input id="participant-confirmation-email" type="email" value={email} onChange={(input) => setEmail(input.target.value)} placeholder="toi@exemple.fr" autoComplete="email" required /><button className="primary" type="submit" disabled={emailBusy}>{emailBusy ? "Enregistrement…" : "Recevoir la confirmation"}</button></div>

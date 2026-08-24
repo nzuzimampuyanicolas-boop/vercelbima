@@ -95,11 +95,8 @@ const columns: Record<SectionKey, Column[]> = {
   ],
   participants: [
     { key: "name", label: "Participant" },
-    { key: "email", label: "E-mail de confirmation", kind: "email" },
     { key: "role", label: "Rôle", kind: "role" },
     { key: "event_title", label: "Sortie" },
-    { key: "confirmation_email_requested_at", label: "Demandé le", kind: "date" },
-    { key: "confirmation_email_sent_at", label: "Confirmation envoyée", kind: "date" },
     { key: "created_at", label: "Ajouté le", kind: "date" },
     { key: "updated_at", label: "Modifié le", kind: "date" },
   ],

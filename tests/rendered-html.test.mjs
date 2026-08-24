@@ -447,36 +447,32 @@ test("recovers organizer management links without adding email before the guest 
 });
 
 test("offers an optional confirmation email only after a participant response", async () => {
-  const [app, route, processor, gmail, edgeApi, migration, admin, privacy] = await Promise.all([
+  const [app, route, edgeApi, migration, privacy] = await Promise.all([
     source("app/page.tsx"),
     source("app/api/events/[slug]/participant-email/route.ts"),
-    source("app/lib/participant-confirmations.ts"),
-    source("app/lib/gmail.ts"),
     source("supabase/functions/bima-api/index.ts"),
     source("supabase/migrations/20260824184324_participant_confirmation_emails.sql"),
-    source("app/admin/page.tsx"),
     source("app/confidentialite/page.tsx"),
   ]);
 
   const guestVote = app.slice(app.indexOf("function RespondPage"), app.indexOf("function SavedPage"));
   const savedPage = app.slice(app.indexOf("function SavedPage"), app.indexOf("function EditEventPanel"));
   assert.doesNotMatch(guestVote, /type="email"/);
+  assert.match(savedPage, /Réponse enregistrée ! 🎉/);
+  assert.match(savedPage, /Tes disponibilités ont bien été envoyées à l’organisateur/);
   assert.match(savedPage, /Recevoir la confirmation/);
+  assert.match(savedPage, /Laisse ton e-mail et on te préviendra lorsque l’organisateur aura choisi la date finale/);
+  assert.match(savedPage, /Laisse ton e-mail et on te préviendra lorsque l’organisateur aura choisi la période finale/);
   assert.match(savedPage, /Uniquement pour cette confirmation\. Pas de newsletter, pas de spam/);
   assert.match(savedPage, /participant_email_submitted/);
   assert.match(app, /participant_response_completed/);
   assert.match(app, /participant_create_event_clicked/);
-  assert.match(route, /processParticipantConfirmations/);
-  assert.match(processor, /participant-confirmations\/claim/);
-  assert.match(processor, /participant-confirmations\/complete/);
-  assert.match(gmail, /sendParticipantConfirmationEmail/);
-  assert.match(gmail, /Ajouter au calendrier/);
+  assert.match(route, /participant-email/);
+  assert.doesNotMatch(route, /confirm/);
   assert.match(edgeApi, /async function saveParticipantConfirmationEmail/);
+  assert.match(edgeApi, /L’adresse e-mail semble incorrecte/);
   assert.match(edgeApi, /participantEmailRateLimited/);
-  assert.match(edgeApi, /async function claimParticipantConfirmations/);
   assert.match(migration, /confirmation_email_requested_at timestamptz/);
-  assert.match(migration, /confirmation_email_sent_at timestamptz/);
-  assert.match(admin, /E-mail de confirmation/);
   assert.match(privacy, /n’est pas utilisée pour une newsletter/);
 });
 
@@ -487,7 +483,7 @@ test("uses the white BIMA logo in every transactional email header", async () =>
   assert.ok(logo.size > 0);
   assert.match(gmail, /EMAIL_LOGO_URL = `\$\{BIMA_PUBLIC_URL\}\/bima-logo-white\.png`/);
   assert.match(gmail, /<img src="\$\{EMAIL_LOGO_URL\}" alt="BIMA" width="54" height="54"/);
-  assert.equal(gmail.match(/\$\{emailHeader\(\)\}/g)?.length, 4);
+  assert.equal(gmail.match(/\$\{emailHeader\(\)\}/g)?.length, 3);
   assert.doesNotMatch(gmail, />BIMA <span style=/);
 });
 
