@@ -11,7 +11,8 @@ type NotificationJob = {
   eventTitle: string;
   managePath: string;
   payload: { participantName?: string };
-  participantCount: number;
+  responseCount: number;
+  availableParticipantCount: number;
   maxPlaces: number;
   bestDate: { startsAt: string; endsAt: string | null; availableCount: number } | null;
   eventType: "outing" | "stay";
@@ -60,7 +61,8 @@ export async function processPendingNotifications(options: { slug?: string; refe
         eventTitle: job.eventTitle,
         manageUrl: new URL(job.managePath, publicUrl).toString(),
         participantName: job.payload.participantName,
-        participantCount: job.participantCount,
+        responseCount: job.responseCount,
+        availableParticipantCount: job.availableParticipantCount,
         maxPlaces: job.maxPlaces,
         bestDateLabel: bestDateLabel(job),
       });

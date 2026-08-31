@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { organizerProgressMessage } from "@/app/lib/organizer-notification-copy";
 
 const GMAIL_SENDER = "bima.sorties@gmail.com";
 const BIMA_PUBLIC_URL = (process.env.BIMA_PUBLIC_URL || "https://bima-app-sigma.vercel.app").replace(/\/$/, "");
@@ -146,7 +147,8 @@ export async function sendOrganizerNotificationEmail({
   eventTitle,
   manageUrl,
   participantName,
-  participantCount,
+  responseCount,
+  availableParticipantCount,
   maxPlaces,
   bestDateLabel,
 }: {
@@ -156,16 +158,18 @@ export async function sendOrganizerNotificationEmail({
   eventTitle: string;
   manageUrl: string;
   participantName?: string;
-  participantCount: number;
+  responseCount: number;
+  availableParticipantCount: number;
   maxPlaces: number;
   bestDateLabel?: string;
 }) {
+  const progressMessage = organizerProgressMessage(responseCount, availableParticipantCount);
   const copy = {
     participant_joined: {
       eyebrow: "UNE RÉPONSE DE PLUS 🎉",
       subject: `${participantName || "Un invité"} a répondu à « ${eventTitle} »`,
       title: `${participantName || "Un invité"} est dans la boucle !`,
-      message: `Vous êtes maintenant ${participantCount} sur ${maxPlaces} places. Jette un œil aux disponibilités et aux étapes choisies.`,
+      message: `${progressMessage} Jette un œil aux disponibilités et aux étapes choisies.`,
       cta: "Voir les réponses →",
     },
     event_full: {
@@ -179,7 +183,7 @@ export async function sendOrganizerNotificationEmail({
       eyebrow: "PETIT COUP DE COUDE ⏰",
       subject: `Plus que 48 h pour les réponses à « ${eventTitle} »`,
       title: "La date limite approche",
-      message: `${participantCount} personne${participantCount > 1 ? "s ont" : " a"} répondu sur ${maxPlaces} places. C’est le bon moment pour relancer le groupe.`,
+      message: `${progressMessage} C’est le bon moment pour relancer le groupe.`,
       cta: "Relancer le groupe →",
     },
     deadline_reached: {

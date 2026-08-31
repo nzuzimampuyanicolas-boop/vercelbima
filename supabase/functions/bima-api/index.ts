@@ -441,6 +441,9 @@ async function readEvent(
     answers: answersByParticipant.get(participant.id) || {},
     stageAnswers: stagesByParticipant.get(participant.id) || {},
   }))
+  const availableParticipantCount = participants.filter((participant) => (
+    Object.values(participant.answers).some(Boolean)
+  )).length
 
   return {
     event: {
@@ -480,6 +483,7 @@ async function readEvent(
     summary: {
       participantCount: participants.length,
       guestCount: participants.filter((participant) => participant.role === "guest").length,
+      availableParticipantCount,
     },
     manage: isManager,
     me: personalParticipantId
@@ -1114,6 +1118,8 @@ async function processNotifications(request: Request, authorization?: boolean) {
       managePath: `/m/${encodeURIComponent(manageShortCode)}`,
       payload: delivery.payload || {},
       participantCount: payload.summary.participantCount,
+      responseCount: payload.summary.guestCount,
+      availableParticipantCount: payload.summary.availableParticipantCount,
       maxPlaces: event.max_places,
       bestDate,
       eventType: event.event_type === "stay" ? "stay" : "outing",

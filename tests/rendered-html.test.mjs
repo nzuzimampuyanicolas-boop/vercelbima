@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile, stat } from "node:fs/promises";
 import test from "node:test";
 import { getCapacityCount, getCapacityReferenceDate, hasMultipleSteps } from "../app/lib/event-metrics.ts";
+import { organizerProgressMessage } from "../app/lib/organizer-notification-copy.ts";
 
 const root = new URL("../", import.meta.url);
 
@@ -262,6 +263,9 @@ test("queues idempotent organizer notifications and exposes explicit preferences
   assert.match(edgeApi, /deadline_48h/);
   assert.match(edgeApi, /deadline_reached/);
   assert.match(edgeApi, /hasNotificationAccess/);
+  assert.match(edgeApi, /Object\.values\(participant\.answers\)\.some\(Boolean\)/);
+  assert.match(edgeApi, /responseCount: payload\.summary\.guestCount/);
+  assert.match(edgeApi, /availableParticipantCount: payload\.summary\.availableParticipantCount/);
   assert.match(page, /Nouvelles réponses/);
   assert.match(page, /Moments importants/);
   assert.match(gmail, /sendOrganizerNotificationEmail/);
@@ -269,6 +273,26 @@ test("queues idempotent organizer notifications and exposes explicit preferences
   assert.match(cronRoute, /process\.env\.CRON_SECRET/);
   assert.match(votesRoute, /after\(async/);
   assert.match(vercel, /\/api\/cron\/notifications/);
+});
+
+test("keeps response and availability counts separate in organizer emails", async () => {
+  const [gmail, notificationLib] = await Promise.all([
+    source("app/lib/gmail.ts"),
+    source("app/lib/notifications.ts"),
+  ]);
+
+  assert.equal(
+    organizerProgressMessage(4, 3),
+    "4 invités ont répondu. 3 personnes sont disponibles à au moins une date.",
+  );
+  assert.equal(
+    organizerProgressMessage(1, 1),
+    "1 invité a répondu. 1 personne est disponible à au moins une date.",
+  );
+  assert.match(gmail, /message: `\$\{progressMessage\} Jette un œil/);
+  assert.match(gmail, /message: `\$\{progressMessage\} C’est le bon moment/);
+  assert.match(notificationLib, /responseCount: job\.responseCount/);
+  assert.match(notificationLib, /availableParticipantCount: job\.availableParticipantCount/);
 });
 
 test("publishes the BIMA image in social preview metadata", async () => {
