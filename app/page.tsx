@@ -1064,6 +1064,7 @@ function ManagePage({ payload, name, availableDateIds, setAvailableDateIds, avai
   onDelete: () => Promise<void>;
 }) {
   const [editing, setEditing] = useState(false);
+  const [shareFallbackVisible, setShareFallbackVisible] = useState(false);
   const event = payload.event;
   const voters = payload.voters || [];
   const bestCount = Math.max(0, ...event.dates.map((date) => date.availableCount));
@@ -1071,13 +1072,32 @@ function ManagePage({ payload, name, availableDateIds, setAvailableDateIds, avai
   const multipleSteps = hasMultipleSteps(event.places);
   const capacityDateLabel = event.confirmedDateId ? "à la date confirmée" : "sur la meilleure date";
   const shareUrl = absoluteUrl(eventSharePath(event.slug));
+  const reminderText = `Petit rappel pour « ${event.title} » 👀\n\nChoisis tes ${event.eventType === "stay" ? "périodes" : "disponibilités"}${multipleSteps ? " et les étapes où tu seras là" : ""}. Ça prend 20 secondes, sans compte.`;
+  const reminderMessage = `${reminderText}\n\n${shareUrl}`;
   const selectedDate = event.dates.find((date) => date.id === event.confirmedDateId);
   const rowStyle = { gridTemplateColumns: `1.6fr repeat(${event.dates.length}, minmax(120px, 1fr))` };
   const stageRowStyle = { gridTemplateColumns: `1.6fr repeat(${event.places.length}, minmax(150px, 1fr))` };
+  const shareReminder = async () => {
+    setShareFallbackVisible(false);
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Relance · ${event.title}`,
+          text: reminderText,
+          url: shareUrl,
+        });
+        return;
+      } catch (shareError) {
+        if (shareError instanceof DOMException && shareError.name === "AbortError") return;
+      }
+    }
+    setShareFallbackVisible(true);
+  };
   return (
     <section className="manage-page">
       <div className="management-head"><div><span className="step-label">PAGE PRIVÉE · ORGANISATEUR</span><h2>{event.title}</h2><p>{event.city} · {event.maxPlaces} places{event.responseDeadline ? ` · Réponses jusqu’au ${formatDate(`${event.responseDeadline}T12:00:00`, { day: "numeric", month: "long" })}` : ""}</p></div><div className="status-panel"><span>{event.status === "confirmed" ? `✓ ${event.eventType === "stay" ? "Période" : "Date"} confirmée` : "● Réponses en cours"}</span><b>{capacityCount} disponibles<small>{capacityDateLabel} · {event.maxPlaces} max</small></b></div></div>
-      <div className="manage-toolbar"><div><b>{payload.summary.guestCount} invité{payload.summary.guestCount > 1 ? "s ont" : " a"} répondu · ton vote est inclus</b><span>Les résultats sont lus directement depuis BIMA.</span></div><button className="secondary" onClick={() => setEditing((value) => !value)}>{editing ? "Fermer" : "Modifier les informations"}</button><button className="secondary" onClick={() => void onCopy(shareUrl, "Lien invité copié")}>{copied ? "Copié" : "Copier le lien"}</button><a className="dark-button share-link" href={`https://wa.me/?text=${encodeURIComponent(`🎉 ${event.title} : 20 sec pour cocher tes dispos${multipleSteps ? " et tes étapes" : ""} 👉 ${shareUrl}`)}`} target="_blank" rel="noreferrer">↗ Relancer</a></div>
+      <div className="manage-toolbar"><div><b>{payload.summary.guestCount} invité{payload.summary.guestCount > 1 ? "s ont" : " a"} répondu · ton vote est inclus</b><span>Les résultats sont lus directement depuis BIMA.</span></div><button className="secondary" onClick={() => setEditing((value) => !value)}>{editing ? "Fermer" : "Modifier les informations"}</button><button className="secondary" onClick={() => void onCopy(shareUrl, "Lien invité copié")}>{copied ? "Copié" : "Copier le lien"}</button><button className="dark-button" type="button" onClick={() => void shareReminder()}>↗ Partager la relance</button></div>
+      {shareFallbackVisible && <section className="share-fallback" aria-label="Options pour partager la relance"><div><b>Le partage direct n’est pas disponible ici.</b><span>Copie la relance complète, puis envoie-la où tu veux.</span></div><button className="dark-button" type="button" onClick={() => void onCopy(reminderMessage, "Relance copiée · tu peux maintenant la partager")}>Copier le message</button><button className="secondary" type="button" onClick={() => void onCopy(shareUrl, "Lien invité copié")}>Copier seulement le lien</button></section>}
       {editing && <EditEventPanel event={event} participantCount={payload.summary.participantCount} busy={busy} onCancel={() => setEditing(false)} onSave={async (input) => { await onUpdate(input); setEditing(false); }} />}
       <NotificationPreferencesPanel preferences={payload.notificationPreferences || { newResponses: true, reminders: true, active: false }} busy={busy} onSave={onUpdateNotifications} />
       <section className="participant-manager" aria-labelledby="participant-manager-title"><div><span className="step-label">LISTE DES PARTICIPANTS</span><h3 id="participant-manager-title">Qui est dans la boucle ?</h3><p>Une erreur ou un doublon ? Tu peux retirer un invité ici.</p></div><div className="participant-list">{voters.map((voter) => <div key={voter.id}><span className={voter.role === "organizer" ? "organizer-color" : "blue"}>{voter.name.slice(0, 2).toUpperCase()}</span><p><b>{voter.name}</b><small>{voter.role === "organizer" ? "Organisateur · toi" : "Invité"}</small></p>{voter.role === "guest" ? <button type="button" onClick={() => void onDeleteParticipant(voter)} disabled={busy} aria-label={`Retirer ${voter.name}`}>Retirer</button> : <em>Protégé</em>}</div>)}</div></section>

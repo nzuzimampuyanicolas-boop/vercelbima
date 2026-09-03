@@ -106,6 +106,20 @@ test("makes the guest invitation unmistakable and keeps the organizer URL privat
   assert.doesNotMatch(page, /Lien organisateur copié/);
 });
 
+test("shares organizer reminders through the native share sheet with a safe fallback", async () => {
+  const page = await source("app/page.tsx");
+
+  assert.match(page, /Partager la relance/);
+  assert.match(page, /await navigator\.share\(\{/);
+  assert.match(page, /title: `Relance · \$\{event\.title\}`/);
+  assert.match(page, /url: shareUrl/);
+  assert.match(page, /shareError\.name === "AbortError"/);
+  assert.match(page, /Copier le message/);
+  assert.match(page, /Copier seulement le lien/);
+  assert.match(page, /Relance copiée · tu peux maintenant la partager/);
+  assert.doesNotMatch(page, /href=\{`https:\/\/wa\.me\/\?text=\$\{encodeURIComponent\(`🎉 \$\{event\.title\} : 20 sec/);
+});
+
 test("accepts optional full Google Maps links and manual places", async () => {
   const [page, edgeApi] = await Promise.all([
     source("app/page.tsx"),
