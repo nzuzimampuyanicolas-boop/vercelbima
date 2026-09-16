@@ -6,6 +6,7 @@ import { track } from "@vercel/analytics";
 import { getCapacityCount, hasMultipleSteps } from "./lib/event-metrics";
 
 type Mode = "home" | "create" | "share" | "respond" | "saved" | "manage" | "confirmed";
+const PLACE_SUGGESTIONS_FEATURE_ENABLED = process.env.NEXT_PUBLIC_BIMA_PLACE_SUGGESTIONS_ENABLED === "true";
 
 const SCREEN_TITLES: Record<Mode, string> = {
   home: "",
@@ -52,6 +53,19 @@ type Participant = {
   stageAnswers: Record<string, boolean>;
 };
 
+type PlaceSuggestion = {
+  id: string;
+  targetPlaceId: string;
+  participantId: string;
+  participantName: string;
+  name: string;
+  city: string;
+  mapsUrl: string;
+  status: "pending" | "selected" | "rejected";
+  createdAt: string;
+  updatedAt: string;
+};
+
 type BimaEvent = {
   slug: string;
   eventType: "outing" | "stay";
@@ -64,6 +78,7 @@ type BimaEvent = {
   confirmedDateId: string | null;
   status: "collecting" | "confirmed";
   createdAt: string;
+  allowPlaceSuggestions: boolean;
   places: EventPlace[];
   dates: EventDate[];
 };
@@ -75,11 +90,13 @@ type EventResponse = {
   me?: Participant;
   voters?: Participant[];
   notificationPreferences?: NotificationPreferences;
+  placeSuggestions?: PlaceSuggestion[];
 };
 
 type NotificationPreferences = {
   newResponses: boolean;
   reminders: boolean;
+  placeSuggestions: boolean;
   active: boolean;
 };
 
@@ -116,6 +133,7 @@ type EventUpdateInput = {
   maxPlaces: number;
   budgetEur: number | null;
   responseDeadline: string | null;
+  allowPlaceSuggestions: boolean;
   places: Array<{ id: string; name: string; address: string; mapsUrl: string }>;
 };
 
@@ -470,7 +488,7 @@ export default function BimaApp({ initialEventSlug = "", initialManageShortCode 
     }
   };
 
-  const updateNotificationPreferences = async (preferences: Pick<NotificationPreferences, "newResponses" | "reminders">) => {
+  const updateNotificationPreferences = async (preferences: Pick<NotificationPreferences, "newResponses" | "reminders" | "placeSuggestions">) => {
     if (!payload || (!manageToken && !manageShortCode)) return;
     setBusy(true);
     setError("");
@@ -486,6 +504,37 @@ export default function BimaApp({ initialEventSlug = "", initialManageShortCode 
     } catch (notificationError) {
       setError(notificationError instanceof Error ? notificationError.message : "Impossible de modifier les notifications.");
       throw notificationError;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const reviewPlaceSuggestion = async (suggestion: PlaceSuggestion, action: "select" | "reject") => {
+    if (!payload || (!manageToken && !manageShortCode)) return;
+    if (action === "select" && hasMultipleSteps(payload.event.places) && payload.summary.guestCount > 0) {
+      const accepted = window.confirm("Choisir ce lieu remplacera l’étape actuelle. Les réponses de présence liées à cette étape seront réinitialisées, mais les disponibilités de dates resteront intactes. Continuer ?");
+      if (!accepted) return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(payload.event.slug)}/place-suggestions`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ manageToken, manageShortCode, suggestionId: suggestion.id, action }),
+      });
+      const updated = await readPayload<EventResponse & { resetStageVoteCount?: number }>(response);
+      setPayload(updated);
+      applyPersonalAnswers(updated);
+      if (action === "select") {
+        showToast(updated.resetStageVoteCount
+          ? `Lieu choisi · ${updated.resetStageVoteCount} réponse${updated.resetStageVoteCount > 1 ? "s" : ""} d’étape à reconfirmer`
+          : "Le lieu proposé est maintenant le lieu officiel");
+      } else {
+        showToast("La proposition a été écartée");
+      }
+    } catch (suggestionError) {
+      setError(suggestionError instanceof Error ? suggestionError.message : "Impossible de traiter cette proposition.");
     } finally {
       setBusy(false);
     }
@@ -608,6 +657,7 @@ export default function BimaApp({ initialEventSlug = "", initialManageShortCode 
               onSaveVote={submitVote}
               onUpdate={updateEvent}
               onUpdateNotifications={updateNotificationPreferences}
+              onReviewPlaceSuggestion={reviewPlaceSuggestion}
               onConfirm={confirmDate}
               onCopy={copyText}
               onDeleteParticipant={deleteParticipant}
@@ -689,6 +739,7 @@ function CreatePage({
   const [budget, setBudget] = useState("30");
   const [deadline, setDeadline] = useState("");
   const [website, setWebsite] = useState("");
+  const [allowPlaceSuggestions, setAllowPlaceSuggestions] = useState(PLACE_SUGGESTIONS_FEATURE_ENABLED);
   const [places, setPlaces] = useState<PlaceDraft[]>([initialPlace()]);
   const [dates, setDates] = useState<DateDraft[]>([{ id: "date-1", date: "", time: "19:30", endDate: "" }]);
   const [busy, setBusy] = useState(false);
@@ -759,6 +810,7 @@ function CreatePage({
           budgetEur: budget ? Number(budget) : null,
           responseDeadline: deadline || null,
           website,
+          ...(PLACE_SUGGESTIONS_FEATURE_ENABLED ? { allowPlaceSuggestions } : {}),
           attribution: currentAttribution(),
           places: resolvedPlaces,
           dates: normalizedDates,
@@ -809,6 +861,7 @@ function CreatePage({
             </div>
           ))}
           {places.length < 2 ? <button className="add-date full" type="button" onClick={() => setPlaces((current) => [...current, initialPlace()])}>＋ Ajouter une deuxième étape</button> : <button className="text-link full" type="button" onClick={() => setPlaces((current) => current.slice(0, 1))}>Retirer la deuxième étape</button>}
+          {PLACE_SUGGESTIONS_FEATURE_ENABLED && <label className="suggestion-toggle full"><input type="checkbox" checked={allowPlaceSuggestions} onChange={(input) => setAllowPlaceSuggestions(input.target.checked)} /><span><b>Laisser le groupe proposer un autre lieu</b><small>Après leur réponse, les invités pourront partager une idée. Tu gardes toujours la décision finale.</small></span></label>}
         </div>
         <div className="date-builder">
           <div className="section-heading"><div><span className="step-label">{eventType === "stay" ? "PÉRIODES" : "DATES"}</span><h3>{eventType === "stay" ? "Quand pourriez-vous partir ?" : "Quand pourrait-elle avoir lieu ?"}</h3></div><small>1 à 4 propositions</small></div>
@@ -934,6 +987,15 @@ function SavedPage({ payload, participantToken, participantShortCode, copied, on
   const [emailBusy, setEmailBusy] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [emailSaved, setEmailSaved] = useState(false);
+  const [suggestions, setSuggestions] = useState<PlaceSuggestion[]>(payload.placeSuggestions || []);
+  const [suggestionOpen, setSuggestionOpen] = useState(Boolean(payload.placeSuggestions?.length));
+  const [suggestion, setSuggestion] = useState<PlaceSuggestion | undefined>(payload.placeSuggestions?.[0]);
+  const [targetPlaceId, setTargetPlaceId] = useState(payload.placeSuggestions?.[0]?.targetPlaceId || payload.event.places[0]?.id || "");
+  const [suggestionName, setSuggestionName] = useState(payload.placeSuggestions?.[0]?.name || "");
+  const [suggestionCity, setSuggestionCity] = useState(payload.placeSuggestions?.[0]?.city || "");
+  const [suggestionMapsUrl, setSuggestionMapsUrl] = useState(payload.placeSuggestions?.[0]?.mapsUrl || "");
+  const [suggestionBusy, setSuggestionBusy] = useState(false);
+  const [suggestionError, setSuggestionError] = useState("");
   const isStay = payload.event.eventType === "stay";
 
   const saveEmail = async (event: FormEvent<HTMLFormElement>) => {
@@ -956,6 +1018,41 @@ function SavedPage({ payload, participantToken, participantShortCode, copied, on
     }
   };
 
+  const saveSuggestion = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setSuggestionBusy(true);
+    setSuggestionError("");
+    try {
+      const response = await fetch(`/api/events/${encodeURIComponent(payload.event.slug)}/place-suggestions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          participantToken,
+          participantShortCode,
+          targetPlaceId,
+          name: suggestionName,
+          city: suggestionCity,
+          mapsUrl: suggestionMapsUrl,
+        }),
+      });
+      const updated = await readPayload<EventResponse>(response);
+      const updatedSuggestions = updated.placeSuggestions || [];
+      const savedSuggestion = updatedSuggestions.find((item) => item.targetPlaceId === targetPlaceId);
+      setSuggestions(updatedSuggestions);
+      setSuggestion(savedSuggestion);
+      if (savedSuggestion) {
+        setSuggestionName(savedSuggestion.name);
+        setSuggestionCity(savedSuggestion.city);
+        setSuggestionMapsUrl(savedSuggestion.mapsUrl);
+      }
+      track("participant_place_suggestion_submitted", { event_type: payload.event.eventType });
+    } catch (reason) {
+      setSuggestionError(reason instanceof Error ? reason.message : "Impossible d’envoyer cette idée de lieu.");
+    } finally {
+      setSuggestionBusy(false);
+    }
+  };
+
   return <section className="center-page compact saved-page">
     <div className="success-mark pop">✓</div>
     <h2>Réponse enregistrée ! 🎉</h2>
@@ -975,6 +1072,20 @@ function SavedPage({ payload, participantToken, participantShortCode, copied, on
       </>}
     </section>
 
+    {PLACE_SUGGESTIONS_FEATURE_ENABLED && payload.event.allowPlaceSuggestions && payload.event.status !== "confirmed" && <section className="place-suggestion-card" aria-labelledby="place-suggestion-title">
+      <span className="step-label">FACULTATIF</span>
+      <h3 id="place-suggestion-title">Tu as un autre lieu en tête ?</h3>
+      <p>Partage ton idée à l’organisateur. C’est lui qui décidera.</p>
+      {!suggestionOpen ? <button className="secondary" type="button" onClick={() => setSuggestionOpen(true)}>Proposer un autre lieu</button> : <form onSubmit={(event) => void saveSuggestion(event)}>
+        {payload.event.places.length > 1 && <label><span>Quelle étape veux-tu remplacer ?</span><select value={targetPlaceId} onChange={(input) => { const existing = suggestions.find((item) => item.targetPlaceId === input.target.value); setTargetPlaceId(input.target.value); setSuggestion(existing); setSuggestionName(existing?.name || ""); setSuggestionCity(existing?.city || ""); setSuggestionMapsUrl(existing?.mapsUrl || ""); }}>{payload.event.places.map((place, index) => <option key={place.id} value={place.id}>Étape {index + 1} — {place.name}</option>)}</select></label>}
+        <div className="suggestion-fields"><label><span>Nom du lieu</span><input value={suggestionName} onChange={(input) => setSuggestionName(input.target.value)} maxLength={160} placeholder="Ex. Le Petit Bouillon" required /></label><label><span>Ville</span><input value={suggestionCity} onChange={(input) => setSuggestionCity(input.target.value)} maxLength={100} placeholder="Ex. Paris" required /></label></div>
+        <label><span>Lien Google Maps <small>facultatif</small></span><input type="url" value={suggestionMapsUrl} onChange={(input) => setSuggestionMapsUrl(input.target.value)} placeholder="https://www.google.com/maps/..." /></label>
+        {suggestionError && <p className="inline-error" role="alert">{suggestionError}</p>}
+        {suggestion && <p className="suggestion-saved" role="status">✓ Ton idée est enregistrée. Tu peux encore la modifier tant que la sortie n’est pas confirmée.</p>}
+        <button className="secondary" type="submit" disabled={suggestionBusy}>{suggestionBusy ? "Envoi…" : suggestion ? "Mettre à jour mon idée" : "Proposer ce lieu"}</button>
+      </form>}
+    </section>}
+
     <div className="token-card"><span>TON LIEN PERSONNEL</span><p>{personalUrl}</p><button onClick={() => void onCopy(personalUrl, "Lien personnel copié")}>{copied ? "Copié" : "Copier"}</button></div>
     <div className="notice warning"><span>★</span><p><b>Conserve ce lien.</b><br />Il permet de modifier tes réponses plus tard, même depuis un autre appareil.</p></div>
     <a className="text-link share-link" href={personalUrl}>Modifier mes réponses →</a>
@@ -993,6 +1104,7 @@ function EditEventPanel({ event, participantCount, busy, onCancel, onSave }: {
   const [maxPlaces, setMaxPlaces] = useState(String(event.maxPlaces));
   const [budget, setBudget] = useState(event.budgetEur == null ? "" : String(event.budgetEur));
   const [deadline, setDeadline] = useState(event.responseDeadline || "");
+  const [allowPlaceSuggestions, setAllowPlaceSuggestions] = useState(event.allowPlaceSuggestions);
   const [places, setPlaces] = useState(() => event.places.map((place) => ({
     id: place.id,
     name: place.name,
@@ -1007,6 +1119,7 @@ function EditEventPanel({ event, participantCount, busy, onCancel, onSave }: {
       maxPlaces: Number(maxPlaces),
       budgetEur: budget ? Number(budget) : null,
       responseDeadline: deadline || null,
+      allowPlaceSuggestions,
       places: places.map((place) => ({ ...place, name: place.name.trim(), address: place.address.trim(), mapsUrl: place.mapsUrl.trim() })),
     });
   };
@@ -1019,6 +1132,7 @@ function EditEventPanel({ event, participantCount, busy, onCancel, onSave }: {
         <label className="field"><span>Nombre de places</span><input type="number" min={Math.max(2, participantCount)} max="200" value={maxPlaces} onChange={(input) => setMaxPlaces(input.target.value)} required /><small>Minimum actuel : {participantCount}</small></label>
         <label className="field"><span>Budget par personne</span><input type="number" min="10" step="10" value={budget} onChange={(input) => setBudget(input.target.value)} placeholder="Facultatif" /></label>
         <label className="field full"><span>Date limite de réponse</span><input type="date" value={deadline} onChange={(input) => setDeadline(input.target.value)} /></label>
+        {PLACE_SUGGESTIONS_FEATURE_ENABLED && <label className="suggestion-toggle full"><input type="checkbox" checked={allowPlaceSuggestions} onChange={(input) => setAllowPlaceSuggestions(input.target.checked)} /><span><b>Laisser le groupe proposer un autre lieu</b><small>L’option reste facultative pour les invités. Tu gardes la décision finale.</small></span></label>}
       </div>
       <div className="edit-places"><span className="step-label">LIEU{places.length > 1 ? "X" : ""}</span>{places.map((place, index) => <fieldset key={place.id}><legend>Étape {index + 1}</legend><label className="field"><span>Nom du lieu</span><input value={place.name} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, name: input.target.value } : item))} maxLength={160} required /></label><label className="field"><span>Ville</span><input value={place.address} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, address: input.target.value } : item))} maxLength={100} required /></label><label className="field full"><span>Lien Google Maps (optionnel)</span><input type="url" value={place.mapsUrl} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, mapsUrl: input.target.value } : item))} placeholder="https://www.google.com/maps/..." /></label></fieldset>)}</div>
       <div className="event-edit-actions"><button type="button" className="secondary" onClick={onCancel} disabled={busy}>Annuler</button><button type="submit" className="primary" disabled={busy}>{busy ? "Enregistrement…" : "Enregistrer les modifications"}</button></div>
@@ -1029,23 +1143,45 @@ function EditEventPanel({ event, participantCount, busy, onCancel, onSave }: {
 function NotificationPreferencesPanel({ preferences, busy, onSave }: {
   preferences: NotificationPreferences;
   busy: boolean;
-  onSave: (preferences: Pick<NotificationPreferences, "newResponses" | "reminders">) => Promise<void>;
+  onSave: (preferences: Pick<NotificationPreferences, "newResponses" | "reminders" | "placeSuggestions">) => Promise<void>;
 }) {
   const [newResponses, setNewResponses] = useState(preferences.newResponses);
   const [reminders, setReminders] = useState(preferences.reminders);
+  const [placeSuggestions, setPlaceSuggestions] = useState(preferences.placeSuggestions);
   return (
     <section className="notification-preferences" aria-labelledby="notification-preferences-title">
       <div><span className="step-label">E-MAILS DE SUIVI</span><h3 id="notification-preferences-title">BIMA te tient au courant</h3><p>{preferences.active ? "Choisis les nouvelles que tu veux recevoir pour cette sortie." : "Cette sortie existait avant les e-mails de suivi. Active-les quand tu veux."}</p></div>
       <div className="notification-options">
         <label><input type="checkbox" checked={newResponses} onChange={(input) => setNewResponses(input.target.checked)} /><span><b>Nouvelles réponses</b><small>Un e-mail lorsqu’un invité répond pour la première fois.</small></span></label>
         <label><input type="checkbox" checked={reminders} onChange={(input) => setReminders(input.target.checked)} /><span><b>Moments importants</b><small>Sortie complète, rappel 48 h avant et décision à la date limite.</small></span></label>
+        {PLACE_SUGGESTIONS_FEATURE_ENABLED && <label><input type="checkbox" checked={placeSuggestions} onChange={(input) => setPlaceSuggestions(input.target.checked)} /><span><b>Nouvelles idées de lieux</b><small>Un e-mail lorsqu’un invité propose une alternative.</small></span></label>}
       </div>
-      <button type="button" className="secondary" disabled={busy} onClick={() => void onSave({ newResponses, reminders })}>{busy ? "Enregistrement…" : preferences.active ? "Enregistrer mes choix" : "Activer ces e-mails"}</button>
+      <button type="button" className="secondary" disabled={busy} onClick={() => void onSave({ newResponses, reminders, placeSuggestions })}>{busy ? "Enregistrement…" : preferences.active ? "Enregistrer mes choix" : "Activer ces e-mails"}</button>
     </section>
   );
 }
 
-function ManagePage({ payload, name, availableDateIds, setAvailableDateIds, availablePlaceIds, setAvailablePlaceIds, busy, error, copied, onSaveVote, onUpdate, onUpdateNotifications, onConfirm, onCopy, onDeleteParticipant, onDelete }: {
+function PlaceSuggestionsPanel({ event, suggestions, busy, onReview }: {
+  event: BimaEvent;
+  suggestions: PlaceSuggestion[];
+  busy: boolean;
+  onReview: (suggestion: PlaceSuggestion, action: "select" | "reject") => Promise<void>;
+}) {
+  const pending = suggestions.filter((suggestion) => suggestion.status === "pending");
+  const history = suggestions.filter((suggestion) => suggestion.status !== "pending");
+  const placeLabel = (targetPlaceId: string) => {
+    const index = event.places.findIndex((place) => place.id === targetPlaceId);
+    const place = event.places[index];
+    return place ? `Étape ${index + 1} · ${place.name}` : "Étape modifiée";
+  };
+  return <section className="place-suggestions-panel" id="place-suggestions" aria-labelledby="place-suggestions-title">
+    <div className="place-suggestions-heading"><div><span className="step-label">LES IDÉES DU GROUPE</span><h3 id="place-suggestions-title">{pending.length ? `${pending.length} proposition${pending.length > 1 ? "s" : ""} à regarder` : "Aucune nouvelle proposition"}</h3><p>Les invités proposent. Tu gardes toujours la décision finale.</p></div><span>{event.allowPlaceSuggestions ? "Suggestions ouvertes" : "Suggestions fermées"}</span></div>
+    {pending.length > 0 && <div className="place-suggestion-list">{pending.map((suggestion) => <article key={suggestion.id}><div><small>{placeLabel(suggestion.targetPlaceId)}</small><h4>{suggestion.name}</h4><p>{suggestion.city} · proposé par <b>{suggestion.participantName}</b></p>{suggestion.mapsUrl && <a href={suggestion.mapsUrl} target="_blank" rel="noreferrer">Ouvrir dans Google Maps ↗</a>}</div><div><button type="button" className="primary" disabled={busy} onClick={() => void onReview(suggestion, "select")}>Choisir ce lieu</button><button type="button" className="secondary" disabled={busy} onClick={() => void onReview(suggestion, "reject")}>Écarter</button></div></article>)}</div>}
+    {history.length > 0 && <details><summary>Voir les propositions traitées ({history.length})</summary><div className="place-suggestion-history">{history.map((suggestion) => <p key={suggestion.id}><b>{suggestion.name}</b><span>{suggestion.status === "selected" ? "Choisie" : "Écartée"}</span></p>)}</div></details>}
+  </section>;
+}
+
+function ManagePage({ payload, name, availableDateIds, setAvailableDateIds, availablePlaceIds, setAvailablePlaceIds, busy, error, copied, onSaveVote, onUpdate, onUpdateNotifications, onReviewPlaceSuggestion, onConfirm, onCopy, onDeleteParticipant, onDelete }: {
   payload: EventResponse;
   name: string;
   availableDateIds: string[];
@@ -1057,7 +1193,8 @@ function ManagePage({ payload, name, availableDateIds, setAvailableDateIds, avai
   copied: boolean;
   onSaveVote: () => Promise<void>;
   onUpdate: (input: EventUpdateInput) => Promise<void>;
-  onUpdateNotifications: (preferences: Pick<NotificationPreferences, "newResponses" | "reminders">) => Promise<void>;
+  onUpdateNotifications: (preferences: Pick<NotificationPreferences, "newResponses" | "reminders" | "placeSuggestions">) => Promise<void>;
+  onReviewPlaceSuggestion: (suggestion: PlaceSuggestion, action: "select" | "reject") => Promise<void>;
   onConfirm: (dateId: string) => Promise<void>;
   onCopy: (text: string, message?: string) => Promise<void>;
   onDeleteParticipant: (participant: Participant) => Promise<void>;
@@ -1099,7 +1236,8 @@ function ManagePage({ payload, name, availableDateIds, setAvailableDateIds, avai
       <div className="manage-toolbar"><div><b>{payload.summary.guestCount} invité{payload.summary.guestCount > 1 ? "s ont" : " a"} répondu · ton vote est inclus</b><span>Les résultats sont lus directement depuis BIMA.</span></div><button className="secondary" onClick={() => setEditing((value) => !value)}>{editing ? "Fermer" : "Modifier les informations"}</button><button className="secondary" onClick={() => void onCopy(shareUrl, "Lien invité copié")}>{copied ? "Copié" : "Copier le lien"}</button><button className="dark-button" type="button" onClick={() => void shareReminder()}>↗ Partager la relance</button></div>
       {shareFallbackVisible && <section className="share-fallback" aria-label="Options pour partager la relance"><div><b>Le partage direct n’est pas disponible ici.</b><span>Copie la relance complète, puis envoie-la où tu veux.</span></div><button className="dark-button" type="button" onClick={() => void onCopy(reminderMessage, "Relance copiée · tu peux maintenant la partager")}>Copier le message</button><button className="secondary" type="button" onClick={() => void onCopy(shareUrl, "Lien invité copié")}>Copier seulement le lien</button></section>}
       {editing && <EditEventPanel event={event} participantCount={payload.summary.participantCount} busy={busy} onCancel={() => setEditing(false)} onSave={async (input) => { await onUpdate(input); setEditing(false); }} />}
-      <NotificationPreferencesPanel preferences={payload.notificationPreferences || { newResponses: true, reminders: true, active: false }} busy={busy} onSave={onUpdateNotifications} />
+      <NotificationPreferencesPanel preferences={payload.notificationPreferences || { newResponses: true, reminders: true, placeSuggestions: true, active: false }} busy={busy} onSave={onUpdateNotifications} />
+      {PLACE_SUGGESTIONS_FEATURE_ENABLED && <PlaceSuggestionsPanel event={event} suggestions={payload.placeSuggestions || []} busy={busy} onReview={onReviewPlaceSuggestion} />}
       <section className="participant-manager" aria-labelledby="participant-manager-title"><div><span className="step-label">LISTE DES PARTICIPANTS</span><h3 id="participant-manager-title">Qui est dans la boucle ?</h3><p>Une erreur ou un doublon ? Tu peux retirer un invité ici.</p></div><div className="participant-list">{voters.map((voter) => <div key={voter.id}><span className={voter.role === "organizer" ? "organizer-color" : "blue"}>{voter.name.slice(0, 2).toUpperCase()}</span><p><b>{voter.name}</b><small>{voter.role === "organizer" ? "Organisateur · toi" : "Invité"}</small></p>{voter.role === "guest" ? <button type="button" onClick={() => void onDeleteParticipant(voter)} disabled={busy} aria-label={`Retirer ${voter.name}`}>Retirer</button> : <em>Protégé</em>}</div>)}</div></section>
       {selectedDate && <div className="manage-confirmed"><div><span>{event.eventType === "stay" ? "PÉRIODE CONFIRMÉE" : "DATE CONFIRMÉE"}</span><b>{formatEventDate(selectedDate, event.eventType)}</b></div><a className="primary share-link" href={`/api/events/${encodeURIComponent(event.slug)}/calendar`}>Télécharger le calendrier .ics</a></div>}
       <div className="organizer-vote"><div className="organizer-vote-heading"><span className="organizer-avatar">{name.slice(0, 2).toUpperCase() || "OR"}</span><div><b>Mes disponibilités</b><small>Ton vote compte comme celui de chaque invité.</small></div><em>ORGANISATEUR</em></div><div className="organizer-options" style={{ gridTemplateColumns: `repeat(${Math.min(event.dates.length, 4)}, 1fr)` }}>{event.dates.map((date) => { const selected = availableDateIds.includes(date.id); return <button type="button" className={selected ? "selected" : ""} key={date.id} onClick={() => setAvailableDateIds(selected ? availableDateIds.filter((id) => id !== date.id) : [...availableDateIds, date.id])} aria-pressed={selected}><span>{formatEventDate(date, event.eventType, true).toUpperCase()}</span><b>{selected ? "✓ Disponible" : "× Pas disponible"}</b></button>; })}</div></div>

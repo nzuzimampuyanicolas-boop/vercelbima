@@ -194,6 +194,38 @@ test("keeps the Framer guest and organizer pages aligned with the backend", asyn
   assert.match(admin, /Présence aux étapes/);
 });
 
+test("keeps guest place suggestions behind preview flags and organizer approval", async () => {
+  const [page, css, proxyRoute, edgeApi, gmail, migration, envExample] = await Promise.all([
+    source("app/page.tsx"),
+    source("app/globals.css"),
+    source("app/api/events/[slug]/place-suggestions/route.ts"),
+    source("supabase/functions/bima-api/index.ts"),
+    source("app/lib/gmail.ts"),
+    source("supabase/migrations/20260916120656_guest_place_suggestions.sql"),
+    source(".env.example"),
+  ]);
+
+  assert.match(envExample, /NEXT_PUBLIC_BIMA_PLACE_SUGGESTIONS_ENABLED=false/);
+  assert.match(envExample, /BIMA_PLACE_SUGGESTIONS_ENABLED=false/);
+  assert.match(page, /process\.env\.NEXT_PUBLIC_BIMA_PLACE_SUGGESTIONS_ENABLED === "true"/);
+  assert.match(page, /Laisser le groupe proposer un autre lieu/);
+  assert.match(page, /Les invités proposent\. Tu gardes toujours la décision finale\./);
+  assert.match(page, /onReviewPlaceSuggestion/);
+  assert.match(css, /\.place-suggestion-card/);
+  assert.match(proxyRoute, /export async function POST/);
+  assert.match(proxyRoute, /export async function PATCH/);
+  assert.match(edgeApi, /Deno\.env\.get\("BIMA_PLACE_SUGGESTIONS_ENABLED"\) === "true"/);
+  assert.match(edgeApi, /async function submitPlaceSuggestion/);
+  assert.match(edgeApi, /async function reviewPlaceSuggestion/);
+  assert.match(edgeApi, /hasManageAccess\(event, manageToken, manageShortCode\)/);
+  assert.match(edgeApi, /place_suggestion_created/);
+  assert.match(gmail, /UNE NOUVELLE IDÉE/);
+  assert.match(migration, /create table if not exists public\.bima_place_suggestions/i);
+  assert.match(migration, /unique \(event_id, target_place_id, participant_id\)/i);
+  assert.match(migration, /enable row level security/i);
+  assert.match(migration, /default false/i);
+});
+
 test("ships the Supabase schema and Edge API used by Framer", async () => {
   const [migration, edgeApi] = await Promise.all([
     source("supabase/migrations/202608020001_bima_backend.sql"),

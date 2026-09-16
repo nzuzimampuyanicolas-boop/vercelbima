@@ -10,7 +10,12 @@ type NotificationJob = {
   organizerName: string;
   eventTitle: string;
   managePath: string;
-  payload: { participantName?: string };
+  payload: {
+    participantName?: string;
+    suggestionName?: string;
+    suggestionCity?: string;
+    targetPlaceName?: string;
+  };
   responseCount: number;
   availableParticipantCount: number;
   maxPlaces: number;
@@ -61,6 +66,9 @@ export async function processPendingNotifications(options: { slug?: string; refe
         eventTitle: job.eventTitle,
         manageUrl: new URL(job.managePath, publicUrl).toString(),
         participantName: job.payload.participantName,
+        suggestionName: job.payload.suggestionName,
+        suggestionCity: job.payload.suggestionCity,
+        targetPlaceName: job.payload.targetPlaceName,
         responseCount: job.responseCount,
         availableParticipantCount: job.availableParticipantCount,
         maxPlaces: job.maxPlaces,

@@ -138,7 +138,7 @@ export async function sendManagementRecoveryEmail({
   });
 }
 
-export type OrganizerNotificationKind = "participant_joined" | "event_full" | "deadline_48h" | "deadline_reached";
+export type OrganizerNotificationKind = "participant_joined" | "event_full" | "deadline_48h" | "deadline_reached" | "place_suggestion_created";
 
 export async function sendOrganizerNotificationEmail({
   kind,
@@ -151,6 +151,9 @@ export async function sendOrganizerNotificationEmail({
   availableParticipantCount,
   maxPlaces,
   bestDateLabel,
+  suggestionName,
+  suggestionCity,
+  targetPlaceName,
 }: {
   kind: OrganizerNotificationKind;
   to: string;
@@ -162,6 +165,9 @@ export async function sendOrganizerNotificationEmail({
   availableParticipantCount: number;
   maxPlaces: number;
   bestDateLabel?: string;
+  suggestionName?: string;
+  suggestionCity?: string;
+  targetPlaceName?: string;
 }) {
   const progressMessage = organizerProgressMessage(responseCount, availableParticipantCount);
   const copy = {
@@ -192,6 +198,13 @@ export async function sendOrganizerNotificationEmail({
       title: "Tout le monde a parlé. Enfin, presque.",
       message: bestDateLabel ? `Le meilleur choix actuel est ${bestDateLabel}. Ouvre les résultats et confirme la sortie.` : "La date limite est arrivée. Ouvre les résultats et choisis le meilleur moment.",
       cta: "Confirmer la sortie →",
+    },
+    place_suggestion_created: {
+      eyebrow: "UNE NOUVELLE IDÉE 📍",
+      subject: `${participantName || "Un invité"} propose un autre lieu pour « ${eventTitle} »`,
+      title: `${participantName || "Un invité"} propose ${suggestionName || "un autre lieu"}`,
+      message: `${suggestionName || "Un nouveau lieu"}${suggestionCity ? ` à ${suggestionCity}` : ""}${targetPlaceName ? ` pourrait remplacer « ${targetPlaceName} »` : ""}. Tu gardes la main : ouvre ta page de gestion pour choisir ce lieu ou l’écarter.`,
+      cta: "Voir la proposition →",
     },
   }[kind];
   const safeName = escapeHtml(organizerName);

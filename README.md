@@ -29,6 +29,7 @@ GMAIL_APP_PASSWORD=
 NOTIFICATION_SECRET=
 CRON_SECRET=
 BIMA_PUBLIC_URL=https://bima-app-sigma.vercel.app
+NEXT_PUBLIC_BIMA_PLACE_SUGGESTIONS_ENABLED=false
 ```
 
 Les secrets Supabase de rôle service restent exclusivement dans l’Edge Function et ne doivent jamais être exposés au navigateur. `NOTIFICATION_SECRET` protège aussi les échanges serveur-à-serveur utilisés pour transmettre l’identité réseau au limiteur ; sa valeur reste uniquement dans Vercel et son empreinte est stockée dans Supabase.
@@ -84,6 +85,19 @@ Les invités votent de la même façon sur une date ou une période. Lorsqu’un
 ## Modification après création
 
 Depuis son lien privé de gestion, l’organisateur peut modifier le titre, les lieux existants, la capacité, le budget et la date limite de réponse. L’API vérifie le lien de gestion, interdit de réduire la capacité sous le nombre de participants déjà inscrits et conserve les propositions de dates ainsi que tous les votes. Le format `outing`/`stay` et la liste des dates restent verrouillés après la création.
+
+## Test des propositions de lieux
+
+La contre-proposition d’un lieu par un invité est préparée comme une expérimentation et reste désactivée par défaut. Elle ne doit pas être activée sur la production avant validation du parcours complet.
+
+Deux interrupteurs indépendants protègent la fonctionnalité :
+
+- `NEXT_PUBLIC_BIMA_PLACE_SUGGESTIONS_ENABLED=true` dans une Preview Vercel affiche l’interface expérimentale ;
+- `BIMA_PLACE_SUGGESTIONS_ENABLED=true` dans une branche Supabase autorise les routes et les nouvelles colonnes de l’API.
+
+La migration `20260916120656_guest_place_suggestions.sql` doit être appliquée uniquement sur une branche Supabase de test. Dans cette version, l’organisateur active ou non les suggestions pour sa sortie. Après avoir répondu, un invité authentifié par son lien personnel peut proposer un nom de lieu, une ville et facultativement un lien Google Maps. L’organisateur reçoit un e-mail pour une nouvelle proposition, puis peut la choisir ou la refuser depuis sa page privée. Choisir une proposition remplace le lieu de l’étape concernée ; les votes de présence liés à cette étape sont alors remis à zéro parce qu’ils portaient sur l’ancien lieu.
+
+Tant que les deux variables restent à `false`, l’application et l’API conservent leur comportement actuel, y compris si le code de la branche est déployé par erreur.
 
 ## Déploiement
 

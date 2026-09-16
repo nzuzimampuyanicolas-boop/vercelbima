@@ -3,6 +3,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.95.0"
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+const placeSuggestionsFeatureEnabled = Deno.env.get("BIMA_PLACE_SUGGESTIONS_ENABLED") === "true"
 const db = createClient(supabaseUrl, serviceRoleKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 })
@@ -83,6 +84,8 @@ const rateLimitPolicies = {
   voteParticipant: { scope: "event-vote-participant", limit: 10, windowSeconds: 600 },
   participantEmailNetwork: { scope: "participant-email-network", limit: 15, windowSeconds: 900 },
   participantEmailIdentity: { scope: "participant-email-identity", limit: 5, windowSeconds: 3600 },
+  placeSuggestionNetwork: { scope: "place-suggestion-network", limit: 20, windowSeconds: 900 },
+  placeSuggestionIdentity: { scope: "place-suggestion-identity", limit: 6, windowSeconds: 3600 },
   organizerMutation: { scope: "organizer-mutation", limit: 30, windowSeconds: 600 },
   organizerInvalid: { scope: "organizer-invalid", limit: 5, windowSeconds: 900 },
   calendar: { scope: "calendar", limit: 30, windowSeconds: 600 },
@@ -364,9 +367,12 @@ async function subscribeProductUpdates(request: Request) {
 }
 
 async function findEvent(slug: string) {
+  const placeSuggestionFields = placeSuggestionsFeatureEnabled
+    ? ",allow_place_suggestions,notify_place_suggestions"
+    : ""
   const { data, error } = await db
     .from("bima_events")
-    .select("id,slug,manage_token_hash,organizer_name,organizer_email,title,city,max_places,budget_eur,response_deadline,confirmed_date_id,event_type,notify_new_responses,notify_reminders,notifications_started_at,created_at,updated_at")
+    .select(`id,slug,manage_token_hash,organizer_name,organizer_email,title,city,max_places,budget_eur,response_deadline,confirmed_date_id,event_type,notify_new_responses,notify_reminders,notifications_started_at,created_at,updated_at${placeSuggestionFields}`)
     .eq("slug", slug)
     .maybeSingle()
   assertDatabase(error, "Impossible de charger cette sortie.")
@@ -444,6 +450,38 @@ async function readEvent(
   const availableParticipantCount = participants.filter((participant) => (
     Object.values(participant.answers).some(Boolean)
   )).length
+  const personalParticipant = personalParticipantId
+    ? participants.find((participant) => participant.id === personalParticipantId)
+    : personalTokenHash
+      ? participants.find((participant) => {
+          const source = (participantsResult.data || []).find((candidate) => candidate.id === participant.id)
+          return source?.token_hash === personalTokenHash
+        })
+      : undefined
+  let placeSuggestions: Array<Record<string, unknown>> | undefined
+  if (placeSuggestionsFeatureEnabled && event.allow_place_suggestions && (isManager || personalParticipant)) {
+    let suggestionQuery = db
+      .from("bima_place_suggestions")
+      .select("id,target_place_id,participant_id,name,city,maps_url,status,created_at,updated_at")
+      .eq("event_id", event.id)
+      .order("created_at", { ascending: false })
+    if (!isManager && personalParticipant) suggestionQuery = suggestionQuery.eq("participant_id", personalParticipant.id)
+    const suggestionResult = await suggestionQuery
+    assertDatabase(suggestionResult.error, "Impossible de charger les idées de lieux.")
+    const participantNames = new Map(participants.map((participant) => [participant.id, participant.name]))
+    placeSuggestions = (suggestionResult.data || []).map((suggestion) => ({
+      id: suggestion.id,
+      targetPlaceId: suggestion.target_place_id,
+      participantId: suggestion.participant_id,
+      participantName: participantNames.get(suggestion.participant_id) || "Un invité",
+      name: suggestion.name,
+      city: suggestion.city,
+      mapsUrl: suggestion.maps_url || "",
+      status: suggestion.status,
+      createdAt: suggestion.created_at,
+      updatedAt: suggestion.updated_at,
+    }))
+  }
 
   return {
     event: {
@@ -456,6 +494,7 @@ async function readEvent(
       responseDeadline: event.response_deadline,
       confirmedDateId: event.confirmed_date_id,
       eventType: event.event_type === "stay" ? "stay" : "outing",
+      allowPlaceSuggestions: placeSuggestionsFeatureEnabled && event.allow_place_suggestions === true,
       status: event.confirmed_date_id ? "confirmed" : "collecting",
       createdAt: event.created_at,
       places: (placesResult.data || []).map((place) => ({
@@ -486,24 +525,19 @@ async function readEvent(
       availableParticipantCount,
     },
     manage: isManager,
-    me: personalParticipantId
-      ? participants.find((participant) => participant.id === personalParticipantId) || undefined
-      : personalTokenHash
-      ? participants.find((participant) => {
-          const source = (participantsResult.data || []).find((candidate) => candidate.id === participant.id)
-          return source?.token_hash === personalTokenHash
-        }) || undefined
-      : undefined,
+    me: personalParticipant,
     voters: isManager ? participants : undefined,
+    placeSuggestions,
     notificationPreferences: isManager ? {
       newResponses: event.notify_new_responses !== false,
       reminders: event.notify_reminders !== false,
+      placeSuggestions: placeSuggestionsFeatureEnabled && event.notify_place_suggestions !== false,
       active: Boolean(event.notifications_started_at),
     } : undefined,
   }
 }
 
-type NotificationKind = "participant_joined" | "event_full" | "deadline_48h" | "deadline_reached"
+type NotificationKind = "participant_joined" | "event_full" | "deadline_48h" | "deadline_reached" | "place_suggestion_created"
 
 async function enqueueNotification(eventId: string, kind: NotificationKind, dedupeKey: string, payload: Record<string, unknown> = {}) {
   const { error } = await db.from("bima_notification_deliveries").insert({
@@ -571,6 +605,7 @@ async function createEvent(request: Request) {
   const budgetEur = rawBudget == null || !Number.isFinite(rawBudget) ? null : Math.max(10, Math.round(rawBudget / 10) * 10)
   const responseDeadline = typeof body.responseDeadline === "string" && body.responseDeadline ? body.responseDeadline.slice(0, 10) : null
   const eventType = body.eventType === "stay" ? "stay" : "outing"
+  const allowPlaceSuggestions = placeSuggestionsFeatureEnabled && body.allowPlaceSuggestions === true
   const attribution = cleanAttribution(body)
   const places = Array.isArray(body.places) ? (body.places as CreatePlace[]).slice(0, 2) : []
   const dates = Array.isArray(body.dates)
@@ -645,12 +680,17 @@ async function createEvent(request: Request) {
   let inserted = false
   let manageShortCode = ""
   try {
-    const { error: eventError } = await db.from("bima_events").insert({
+    const eventInsert: Record<string, unknown> = {
       id: eventId, slug, manage_token_hash: await sha256(manageToken), organizer_name: organizerName, organizer_email: organizerEmail,
       title, city, max_places: maxPlaces, budget_eur: budgetEur, response_deadline: responseDeadline, event_type: eventType, ...attribution,
       notify_new_responses: true, notify_reminders: true, notifications_started_at: now,
       created_at: now, updated_at: now,
-    })
+    }
+    if (placeSuggestionsFeatureEnabled) {
+      eventInsert.allow_place_suggestions = allowPlaceSuggestions
+      eventInsert.notify_place_suggestions = true
+    }
+    const { error: eventError } = await db.from("bima_events").insert(eventInsert)
     assertDatabase(eventError, "Impossible de créer la sortie.")
     inserted = true
     const [participantResult, placesResult, datesResult] = await Promise.all([
@@ -697,6 +737,7 @@ async function updateEvent(request: Request, slug: string) {
   const maxPlaces = Math.round(Number(body.maxPlaces))
   const budgetEur = body.budgetEur == null || body.budgetEur === "" ? null : Math.round(Number(body.budgetEur))
   const responseDeadline = typeof body.responseDeadline === "string" && body.responseDeadline ? body.responseDeadline.slice(0, 10) : null
+  const allowPlaceSuggestions = placeSuggestionsFeatureEnabled && body.allowPlaceSuggestions === true
   const submittedPlaces = Array.isArray(body.places) ? body.places as UpdatePlace[] : []
 
   if (!title) return json({ error: "Le nom de la sortie est obligatoire." }, 400)
@@ -762,14 +803,16 @@ async function updateEvent(request: Request, slug: string) {
     const { error } = await db.from("bima_places").update(changes).eq("id", place.id).eq("event_id", event.id)
     assertDatabase(error, "Impossible de modifier un lieu.")
   }
-  const { error: updateError } = await db.from("bima_events").update({
+  const eventChanges: Record<string, unknown> = {
     title,
     city: normalizedPlaces[0]?.address || event.city,
     max_places: maxPlaces,
     budget_eur: budgetEur,
     response_deadline: responseDeadline,
     updated_at: now,
-  }).eq("id", event.id)
+  }
+  if (placeSuggestionsFeatureEnabled) eventChanges.allow_place_suggestions = allowPlaceSuggestions
+  const { error: updateError } = await db.from("bima_events").update(eventChanges).eq("id", event.id)
   assertDatabase(updateError, "Impossible de modifier cette sortie.")
 
   return json(await readEvent(slug, manageToken, manageToken, manageShortCode))
@@ -782,16 +825,18 @@ async function updateNotificationPreferences(request: Request, slug: string) {
   const event = await findEvent(slug)
   if (!event) return json({ error: "Cette sortie n’existe pas." }, 404)
   if (!await hasManageAccess(event, manageToken, manageShortCode)) return json({ error: "Lien de gestion invalide." }, 403)
-  if (typeof body.newResponses !== "boolean" || typeof body.reminders !== "boolean") {
+  if (typeof body.newResponses !== "boolean" || typeof body.reminders !== "boolean" || (placeSuggestionsFeatureEnabled && typeof body.placeSuggestions !== "boolean")) {
     return json({ error: "Préférences de notification invalides." }, 400)
   }
   const now = new Date().toISOString()
-  const { error } = await db.from("bima_events").update({
+  const notificationChanges: Record<string, unknown> = {
     notify_new_responses: body.newResponses,
     notify_reminders: body.reminders,
     notifications_started_at: event.notifications_started_at || now,
     updated_at: now,
-  }).eq("id", event.id)
+  }
+  if (placeSuggestionsFeatureEnabled) notificationChanges.notify_place_suggestions = body.placeSuggestions
+  const { error } = await db.from("bima_events").update(notificationChanges).eq("id", event.id)
   assertDatabase(error, "Impossible de modifier les notifications.")
   return json(await readEvent(slug, manageToken, manageToken, manageShortCode))
 }
@@ -901,6 +946,198 @@ async function submitVote(request: Request, slug: string) {
       shortKind === "manage" ? participantShortCode : null,
       shortKind === "participant" ? participantShortCode : null,
     )),
+  })
+}
+
+async function findGuestParticipant(
+  eventId: string,
+  participantToken: string,
+  participantShortCode: string,
+) {
+  if (participantShortCode) {
+    const link = await findShortLink(participantShortCode, "participant")
+    if (link?.event_id === eventId && link.participant_id) {
+      const result = await db.from("bima_participants")
+        .select("id,name,role")
+        .eq("event_id", eventId)
+        .eq("id", link.participant_id)
+        .maybeSingle()
+      assertDatabase(result.error, "Impossible de retrouver ce participant.")
+      return result.data?.role === "guest" ? result.data : null
+    }
+  }
+  if (participantToken) {
+    const result = await db.from("bima_participants")
+      .select("id,name,role")
+      .eq("event_id", eventId)
+      .eq("token_hash", await sha256(participantToken))
+      .maybeSingle()
+    assertDatabase(result.error, "Impossible de retrouver ce participant.")
+    return result.data?.role === "guest" ? result.data : null
+  }
+  return null
+}
+
+function validateSuggestionMapsUrl(value: unknown) {
+  const mapsUrl = cleanText(value, 2000)
+  if (!mapsUrl) return ""
+  let parsedUrl: URL
+  try {
+    parsedUrl = new URL(mapsUrl)
+  } catch {
+    throw new Error("Le lien du lieu est invalide.")
+  }
+  if (!isGoogleMapsUrl(parsedUrl) || parsedUrl.hostname === "maps.app.goo.gl" || parsedUrl.hostname === "goo.gl") {
+    throw new Error("Utilise un lien Google Maps classique, ou laisse le champ vide.")
+  }
+  return mapsUrl
+}
+
+async function submitPlaceSuggestion(request: Request, slug: string) {
+  if (!placeSuggestionsFeatureEnabled) return json({ error: "Cette fonctionnalité de test n’est pas activée." }, 404)
+  const body = await request.json()
+  const event = await findEvent(slug)
+  if (!event) return json({ error: "Cette sortie n’existe pas." }, 404)
+  if (!event.allow_place_suggestions) return json({ error: "L’organisateur n’accepte pas de proposition de lieu pour cette sortie." }, 403)
+  if (event.confirmed_date_id) return json({ error: "La sortie est confirmée : les propositions de lieux sont closes." }, 409)
+
+  const participantToken = cleanText(body.participantToken, 128)
+  const participantShortCode = cleanText(body.participantShortCode, 64)
+  const participant = await findGuestParticipant(event.id, participantToken, participantShortCode)
+  if (!participant) return json({ error: "Ce lien personnel est invalide." }, 403)
+
+  const targetPlaceId = cleanText(body.targetPlaceId, 80)
+  const name = cleanText(body.name, 160)
+  const city = cleanText(body.city, 100)
+  if (!name || !city) return json({ error: "Indique le nom du lieu et sa ville." }, 400)
+  let mapsUrl = ""
+  try {
+    mapsUrl = validateSuggestionMapsUrl(body.mapsUrl)
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : "Le lien du lieu est invalide." }, 400)
+  }
+
+  const { data: targetPlace, error: placeError } = await db.from("bima_places")
+    .select("id,name")
+    .eq("event_id", event.id)
+    .eq("id", targetPlaceId)
+    .maybeSingle()
+  assertDatabase(placeError, "Impossible de vérifier l’étape concernée.")
+  if (!targetPlace) return json({ error: "Cette étape n’appartient pas à la sortie." }, 400)
+
+  const { data: existing, error: existingError } = await db.from("bima_place_suggestions")
+    .select("id")
+    .eq("event_id", event.id)
+    .eq("target_place_id", targetPlaceId)
+    .eq("participant_id", participant.id)
+    .maybeSingle()
+  assertDatabase(existingError, "Impossible de vérifier cette proposition.")
+
+  const now = new Date().toISOString()
+  const suggestionId = existing?.id || crypto.randomUUID()
+  const suggestionRow = {
+    id: suggestionId,
+    event_id: event.id,
+    target_place_id: targetPlaceId,
+    participant_id: participant.id,
+    name,
+    city,
+    maps_url: mapsUrl || null,
+    status: "pending",
+    updated_at: now,
+    ...(existing ? {} : { created_at: now }),
+  }
+  const { error: saveError } = await db.from("bima_place_suggestions")
+    .upsert(suggestionRow, { onConflict: "event_id,target_place_id,participant_id" })
+  assertDatabase(saveError, "Impossible d’enregistrer cette idée de lieu.")
+
+  if (!existing && event.notifications_started_at && event.notify_place_suggestions !== false) {
+    await enqueueNotification(event.id, "place_suggestion_created", `place_suggestion_created:${suggestionId}`, {
+      participantName: participant.name,
+      suggestionName: name,
+      suggestionCity: city,
+      targetPlaceName: targetPlace.name,
+    })
+  }
+
+  return json({
+    ok: true,
+    created: !existing,
+    ...(await readEvent(slug, null, participantToken, null, participantShortCode)),
+  }, existing ? 200 : 201)
+}
+
+async function reviewPlaceSuggestion(request: Request, slug: string) {
+  if (!placeSuggestionsFeatureEnabled) return json({ error: "Cette fonctionnalité de test n’est pas activée." }, 404)
+  const body = await request.json()
+  const manageToken = cleanText(body.manageToken, 128)
+  const manageShortCode = cleanText(body.manageShortCode, 64)
+  const event = await findEvent(slug)
+  if (!event) return json({ error: "Cette sortie n’existe pas." }, 404)
+  if (!await hasManageAccess(event, manageToken, manageShortCode)) return json({ error: "Lien de gestion invalide." }, 403)
+  if (event.confirmed_date_id) return json({ error: "La sortie est déjà confirmée." }, 409)
+
+  const suggestionId = cleanText(body.suggestionId, 80)
+  const action = cleanText(body.action, 20)
+  if (!suggestionId || !["select", "reject"].includes(action)) return json({ error: "Action invalide." }, 400)
+  const { data: suggestion, error: suggestionError } = await db.from("bima_place_suggestions")
+    .select("id,target_place_id,name,city,maps_url")
+    .eq("event_id", event.id)
+    .eq("id", suggestionId)
+    .maybeSingle()
+  assertDatabase(suggestionError, "Impossible de retrouver cette proposition.")
+  if (!suggestion) return json({ error: "Cette proposition n’existe plus." }, 404)
+
+  const now = new Date().toISOString()
+  let resetStageVoteCount = 0
+  if (action === "reject") {
+    const { error } = await db.from("bima_place_suggestions")
+      .update({ status: "rejected", updated_at: now })
+      .eq("id", suggestion.id)
+      .eq("event_id", event.id)
+    assertDatabase(error, "Impossible d’écarter cette proposition.")
+  } else {
+    const mapsUrl = validateSuggestionMapsUrl(suggestion.maps_url)
+    const { count, error: countError } = await db.from("bima_stage_votes")
+      .select("participant_id", { count: "exact", head: true })
+      .eq("place_id", suggestion.target_place_id)
+    assertDatabase(countError, "Impossible de vérifier les réponses de cette étape.")
+    resetStageVoteCount = count || 0
+    const { error: placeUpdateError } = await db.from("bima_places").update({
+      name: suggestion.name,
+      address: suggestion.city,
+      maps_url: mapsUrl,
+      rating: null,
+      rating_label: null,
+      category: null,
+      hours: null,
+      image: null,
+    }).eq("id", suggestion.target_place_id).eq("event_id", event.id)
+    assertDatabase(placeUpdateError, "Impossible de choisir ce lieu.")
+    if (resetStageVoteCount) {
+      const { error: resetError } = await db.from("bima_stage_votes").delete().eq("place_id", suggestion.target_place_id)
+      assertDatabase(resetError, "Impossible de réinitialiser les réponses de cette étape.")
+    }
+    const { error: rejectOthersError } = await db.from("bima_place_suggestions")
+      .update({ status: "rejected", updated_at: now })
+      .eq("event_id", event.id)
+      .eq("target_place_id", suggestion.target_place_id)
+    assertDatabase(rejectOthersError, "Impossible de clôturer les autres propositions.")
+    const { error: selectError } = await db.from("bima_place_suggestions")
+      .update({ status: "selected", updated_at: now })
+      .eq("id", suggestion.id)
+      .eq("event_id", event.id)
+    assertDatabase(selectError, "Impossible de sélectionner cette proposition.")
+    const { data: targetPlace } = await db.from("bima_places").select("position").eq("id", suggestion.target_place_id).maybeSingle()
+    if (targetPlace?.position === 0) {
+      const { error: eventUpdateError } = await db.from("bima_events").update({ city: suggestion.city, updated_at: now }).eq("id", event.id)
+      assertDatabase(eventUpdateError, "Impossible de mettre à jour la ville de la sortie.")
+    }
+  }
+
+  return json({
+    resetStageVoteCount,
+    ...(await readEvent(slug, manageToken, manageToken, manageShortCode)),
   })
 }
 
@@ -1562,6 +1799,28 @@ async function participantEmailRateLimited(
   )
 }
 
+async function placeSuggestionRateLimited(
+  request: Request,
+  slug: string,
+  operation: () => Promise<Response>,
+) {
+  const body = await request.clone().json().catch(() => ({}))
+  const personalCredential = cleanText(body.participantToken || body.participantShortCode, 128)
+  return await rateLimited(
+    request,
+    { ...rateLimitPolicies.placeSuggestionNetwork, discriminator: slug },
+    async () => {
+      if (!personalCredential) return await operation()
+      const participantKey = await sha256(`${slug}:${personalCredential}`)
+      return await rateLimited(
+        request,
+        { ...rateLimitPolicies.placeSuggestionIdentity, discriminator: participantKey },
+        operation,
+      )
+    },
+  )
+}
+
 async function adminRateLimited(
   request: Request,
   validPolicy: RateLimitPolicy,
@@ -1648,7 +1907,7 @@ Deno.serve(async (request: Request) => {
         ),
       )
     }
-    const match = route.match(/^\/api\/events\/([^/]+)(?:\/(votes|participant-email|confirm|calendar|delete|notifications))?$/)
+    const match = route.match(/^\/api\/events\/([^/]+)(?:\/(votes|participant-email|place-suggestions|confirm|calendar|delete|notifications))?$/)
     if (match) {
       const slug = decodeURIComponent(match[1])
       const action = match[2]
@@ -1682,6 +1941,20 @@ Deno.serve(async (request: Request) => {
           request,
           slug,
           () => saveParticipantConfirmationEmail(request, slug),
+        )
+      }
+      if (request.method === "POST" && action === "place-suggestions") {
+        return await placeSuggestionRateLimited(
+          request,
+          slug,
+          () => submitPlaceSuggestion(request, slug),
+        )
+      }
+      if (request.method === "PATCH" && action === "place-suggestions") {
+        return await organizerRateLimited(
+          request,
+          slug,
+          () => reviewPlaceSuggestion(request, slug),
         )
       }
       if (request.method === "POST" && action === "notifications") {
