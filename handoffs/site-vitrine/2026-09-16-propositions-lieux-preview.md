@@ -2,7 +2,9 @@
 
 ## Statut
 
-La fonctionnalité est développée derrière deux interrupteurs techniques, mais elle n’est pas publiée en production. Elle doit d’abord être testée sur une Preview Vercel reliée à une branche Supabase de test.
+La fonctionnalité est développée derrière deux interrupteurs techniques et activée uniquement sur un environnement de test isolé. Elle n’est pas publiée en production.
+
+La Preview Vercel est désormais reliée au projet Supabase séparé « Preview BIMA ». Le parcours technique a été vérifié de bout en bout avec des données fictives : création d’une sortie, réponse d’un invité, proposition d’un lieu, lecture côté organisateur, refus de la proposition et création de la notification.
 
 ## Ce qui est prêt à tester
 
@@ -32,6 +34,8 @@ Aucune. Ne pas annoncer cette fonctionnalité sur la vitrine tant que le test pr
 
 La production reste inchangée : https://bima-app-sigma.vercel.app/
 
-La branche dispose d’une Preview Vercel : https://bima-app-git-codex-place-suggestions-preview-bima6.vercel.app/
+La branche dispose d’une Preview Vercel active : https://bima-app-git-codex-place-suggestions-preview-bima6.vercel.app/
 
-L’interface expérimentale y reste volontairement masquée tant que cette Preview n’est pas reliée à une branche Supabase de test et que les deux interrupteurs ne sont pas activés. Ne pas utiliser cette URL pour annoncer la fonctionnalité au public.
+L’interface expérimentale est visible sur cette Preview. Elle utilise exclusivement le projet Supabase de test `msmnpgoggvogslvkfgwu` et ne touche pas aux sorties de production.
+
+Ne pas utiliser cette URL pour annoncer la fonctionnalité au public. La Preview peut demander une authentification Vercel aux testeurs externes selon les réglages de protection du projet.
