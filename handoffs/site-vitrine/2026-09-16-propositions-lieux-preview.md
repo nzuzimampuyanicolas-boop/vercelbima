@@ -28,8 +28,10 @@ Aucune. Ne pas annoncer cette fonctionnalité sur la vitrine tant que le test pr
 - Ajouter une mention courte dans la démonstration : « Ton groupe peut proposer un autre lieu, tu gardes le dernier mot. »
 - Montrer une seule contre-proposition dans la page de gestion, avec les actions « Choisir » et « Refuser ».
 
-## URL publique
+## URLs
 
 La production reste inchangée : https://bima-app-sigma.vercel.app/
 
-L’URL de Preview sera ajoutée seulement après création de l’environnement de test isolé.
+La branche dispose d’une Preview Vercel : https://bima-app-git-codex-place-suggestions-preview-bima6.vercel.app/
+
+L’interface expérimentale y reste volontairement masquée tant que cette Preview n’est pas reliée à une branche Supabase de test et que les deux interrupteurs ne sont pas activés. Ne pas utiliser cette URL pour annoncer la fonctionnalité au public.
