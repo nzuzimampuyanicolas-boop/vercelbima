@@ -685,6 +685,10 @@ type UpdatePlace = {
   mapsUrl?: string
 }
 
+type UpdateDate = CreateDate & {
+  id?: string
+}
+
 async function updateEvent(request: Request, slug: string) {
   const body = await request.json()
   const manageToken = cleanText(body.manageToken, 128)
@@ -697,15 +701,18 @@ async function updateEvent(request: Request, slug: string) {
   const maxPlaces = Math.round(Number(body.maxPlaces))
   const budgetEur = body.budgetEur == null || body.budgetEur === "" ? null : Math.round(Number(body.budgetEur))
   const responseDeadline = typeof body.responseDeadline === "string" && body.responseDeadline ? body.responseDeadline.slice(0, 10) : null
+  const reopenConfirmed = body.reopenConfirmed === true
   const submittedPlaces = Array.isArray(body.places) ? body.places as UpdatePlace[] : []
+  const submittedDates = Array.isArray(body.dates) ? body.dates as UpdateDate[] : []
 
   if (!title) return json({ error: "Le nom de la sortie est obligatoire." }, 400)
   if (!Number.isFinite(maxPlaces) || maxPlaces < 2 || maxPlaces > 200) return json({ error: "Le nombre de places doit être compris entre 2 et 200." }, 400)
   if (budgetEur != null && (!Number.isFinite(budgetEur) || budgetEur < 10 || budgetEur % 10 !== 0)) return json({ error: "Le budget doit avancer de 10 € en 10 €, à partir de 10 €." }, 400)
+  if (submittedDates.length < 1 || submittedDates.length > 4) return json({ error: "Conserve entre 1 et 4 propositions de dates." }, 400)
 
   const [placesResult, datesResult, participantsResult] = await Promise.all([
     db.from("bima_places").select("id,position,maps_url").eq("event_id", event.id).order("position"),
-    db.from("bima_date_options").select("starts_at").eq("event_id", event.id).order("starts_at"),
+    db.from("bima_date_options").select("id,position,starts_at,ends_at").eq("event_id", event.id).order("position"),
     db.from("bima_participants").select("id", { count: "exact", head: true }).eq("event_id", event.id),
   ])
   for (const result of [placesResult, datesResult, participantsResult]) assertDatabase(result.error, "Impossible de vérifier la sortie.")
@@ -719,9 +726,57 @@ async function updateEvent(request: Request, slug: string) {
   if (new Set(submittedIds).size !== existingIds.size || submittedIds.some((id) => !existingIds.has(id))) {
     return json({ error: "Une des étapes n’appartient pas à cette sortie." }, 400)
   }
+
+  const existingDates = datesResult.data || []
+  const existingDateIds = new Set(existingDates.map((date) => date.id))
+  const normalizedDates: Array<NormalizedDate & { id: string | null }> = []
+  for (const submittedDate of submittedDates) {
+    const id = cleanText(submittedDate.id, 80) || null
+    if (id && !existingDateIds.has(id)) return json({ error: "Une des dates n’appartient pas à cette sortie." }, 400)
+    if (id && normalizedDates.some((date) => date.id === id)) return json({ error: "Une même date ne peut pas être envoyée deux fois." }, 400)
+    const normalized = normalizeCreateDate(submittedDate)
+    if (!normalized) return json({ error: "Une des dates est invalide." }, 400)
+    if (event.event_type === "outing") normalized.endsAt = null
+    normalizedDates.push({ id, ...normalized })
+  }
+
+  const timestampsMatch = (left: string | null, right: string | null) => (
+    left === right || (left != null && right != null && Date.parse(left) === Date.parse(right))
+  )
+  const changedExistingDateIds = new Set(normalizedDates.flatMap((date) => {
+    if (!date.id) return []
+    const existingDate = existingDates.find((candidate) => candidate.id === date.id)
+    return existingDate && timestampsMatch(existingDate.starts_at, date.startsAt) && timestampsMatch(existingDate.ends_at, date.endsAt)
+      ? []
+      : [date.id]
+  }))
+  const submittedDateIds = new Set(normalizedDates.flatMap((date) => date.id ? [date.id] : []))
+  const removedDateIds = existingDates.filter((date) => !submittedDateIds.has(date.id)).map((date) => date.id)
+  const orderChanged = normalizedDates.some((date, position) => date.id && existingDates.find((candidate) => candidate.id === date.id)?.position !== position)
+  const datesChanged = normalizedDates.some((date) => !date.id) || changedExistingDateIds.size > 0 || removedDateIds.length > 0 || orderChanged
+  const minimumStart = Date.now() + 5 * 60 * 1000
+  const maximumStart = Date.now() + 2 * 365 * 24 * 60 * 60 * 1000
+  for (const date of normalizedDates) {
+    const isNewOrChanged = !date.id || changedExistingDateIds.has(date.id)
+    if (!isNewOrChanged) continue
+    const startsAt = Date.parse(date.startsAt)
+    if (startsAt < minimumStart || startsAt > maximumStart) {
+      return json({ error: "Les nouvelles dates doivent être futures et situées dans les deux prochaines années." }, 400)
+    }
+    if (event.event_type === "stay") {
+      if (!date.endsAt) return json({ error: "Chaque séjour doit avoir une date de retour." }, 400)
+      const duration = Date.parse(date.endsAt) - startsAt
+      if (duration < 0 || duration > 30 * 24 * 60 * 60 * 1000) {
+        return json({ error: "Chaque séjour doit se terminer après le départ et durer 30 jours maximum." }, 400)
+      }
+    }
+  }
+  if (datesChanged && event.confirmed_date_id && !reopenConfirmed) {
+    return json({ error: "Rouvre les réponses avant de modifier les dates de cette sortie confirmée." }, 409)
+  }
   if (responseDeadline) {
     const deadlineTimestamp = Date.parse(`${responseDeadline}T23:59:59Z`)
-    const firstDateTimestamp = Math.min(...(datesResult.data || []).map((date) => Date.parse(date.starts_at)))
+    const firstDateTimestamp = Math.min(...normalizedDates.map((date) => Date.parse(date.startsAt)))
     if (!Number.isFinite(deadlineTimestamp) || deadlineTimestamp >= firstDateTimestamp) {
       return json({ error: "La date limite de réponse doit précéder la première proposition." }, 400)
     }
@@ -762,14 +817,23 @@ async function updateEvent(request: Request, slug: string) {
     const { error } = await db.from("bima_places").update(changes).eq("id", place.id).eq("event_id", event.id)
     assertDatabase(error, "Impossible de modifier un lieu.")
   }
-  const { error: updateError } = await db.from("bima_events").update({
+  if (datesChanged) {
+    const { error: dateUpdateError } = await db.rpc("bima_update_event_dates", {
+      p_event_id: event.id,
+      p_dates: normalizedDates.map((date) => ({ id: date.id, startsAt: date.startsAt, endsAt: date.endsAt })),
+      p_reopen_confirmed: reopenConfirmed,
+    })
+    assertDatabase(dateUpdateError, "Impossible de modifier les dates.")
+  }
+  const eventChanges: Record<string, unknown> = {
     title,
     city: normalizedPlaces[0]?.address || event.city,
     max_places: maxPlaces,
     budget_eur: budgetEur,
     response_deadline: responseDeadline,
     updated_at: now,
-  }).eq("id", event.id)
+  }
+  const { error: updateError } = await db.from("bima_events").update(eventChanges).eq("id", event.id)
   assertDatabase(updateError, "Impossible de modifier cette sortie.")
 
   return json(await readEvent(slug, manageToken, manageToken, manageShortCode))
