@@ -133,8 +133,10 @@ type EventUpdateInput = {
   maxPlaces: number;
   budgetEur: number | null;
   responseDeadline: string | null;
+  reopenConfirmed: boolean;
   allowPlaceSuggestions: boolean;
   places: Array<{ id: string; name: string; address: string; mapsUrl: string }>;
+  dates: Array<{ id?: string; startsAt: string; endsAt: string | null }>;
 };
 
 const initialPlace = (): PlaceDraft => ({
@@ -189,6 +191,28 @@ function stayDateParts(value: string) {
     day: new Intl.DateTimeFormat("fr-FR", { weekday: "short", timeZone: "UTC" }).format(date).replace(".", "").toUpperCase(),
     number: new Intl.DateTimeFormat("fr-FR", { day: "2-digit", timeZone: "UTC" }).format(date),
     month: new Intl.DateTimeFormat("fr-FR", { month: "short", timeZone: "UTC" }).format(date).replace(".", "").toUpperCase(),
+  };
+}
+
+function localDateInput(value: string) {
+  const date = new Date(value);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function localTimeInput(value: string) {
+  const date = new Date(value);
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function eventDateDraft(date: EventDate, eventType: BimaEvent["eventType"]): DateDraft {
+  return {
+    id: date.id,
+    date: eventType === "stay" ? date.startsAt.slice(0, 10) : localDateInput(date.startsAt),
+    time: eventType === "stay" ? "" : localTimeInput(date.startsAt),
+    endDate: eventType === "stay" ? date.endsAt?.slice(0, 10) || "" : "",
   };
 }
 
@@ -479,7 +503,7 @@ export default function BimaApp({ initialEventSlug = "", initialManageShortCode 
       const updated = await readPayload<EventResponse>(response);
       setPayload(updated);
       applyPersonalAnswers(updated);
-      showToast("Les informations de la sortie sont à jour");
+      showToast(input.reopenConfirmed ? "Dates modifiées · les réponses sont rouvertes" : "Les informations de la sortie sont à jour");
     } catch (updateError) {
       setError(updateError instanceof Error ? updateError.message : "Impossible de modifier cette sortie.");
       throw updateError;
@@ -1093,9 +1117,10 @@ function SavedPage({ payload, participantToken, participantShortCode, copied, on
   </section>;
 }
 
-function EditEventPanel({ event, participantCount, busy, onCancel, onSave }: {
+function EditEventPanel({ event, participantCount, voters, busy, onCancel, onSave }: {
   event: BimaEvent;
   participantCount: number;
+  voters: Participant[];
   busy: boolean;
   onCancel: () => void;
   onSave: (input: EventUpdateInput) => Promise<void>;
@@ -1105,6 +1130,9 @@ function EditEventPanel({ event, participantCount, busy, onCancel, onSave }: {
   const [budget, setBudget] = useState(event.budgetEur == null ? "" : String(event.budgetEur));
   const [deadline, setDeadline] = useState(event.responseDeadline || "");
   const [allowPlaceSuggestions, setAllowPlaceSuggestions] = useState(event.allowPlaceSuggestions);
+  const [dates, setDates] = useState<DateDraft[]>(() => event.dates.map((date) => eventDateDraft(date, event.eventType)));
+  const [dateChangeAccepted, setDateChangeAccepted] = useState(false);
+  const [localError, setLocalError] = useState("");
   const [places, setPlaces] = useState(() => event.places.map((place) => ({
     id: place.id,
     name: place.name,
@@ -1112,21 +1140,65 @@ function EditEventPanel({ event, participantCount, busy, onCancel, onSave }: {
     mapsUrl: place.mapsUrl,
   })));
 
+  const changedOrRemovedDateIds = new Set(event.dates.flatMap((original) => {
+    const draft = dates.find((date) => date.id === original.id);
+    if (!draft) return [original.id];
+    if (!draft.date || (event.eventType === "outing" && !draft.time) || (event.eventType === "stay" && !draft.endDate)) return [original.id];
+    const draftStart = event.eventType === "stay"
+      ? Date.parse(`${draft.date}T00:00:00.000Z`)
+      : new Date(`${draft.date}T${draft.time}:00`).getTime();
+    const draftEnd = event.eventType === "stay" ? Date.parse(`${draft.endDate}T00:00:00.000Z`) : null;
+    return draftStart === Date.parse(original.startsAt) && draftEnd === (original.endsAt ? Date.parse(original.endsAt) : null)
+      ? []
+      : [original.id];
+  }));
+  const hasNewDate = dates.some((date) => date.id.startsWith("new-date-"));
+  const datesChanged = hasNewDate || changedOrRemovedDateIds.size > 0;
+  const affectedParticipants = voters.filter((voter) => (
+    [...changedOrRemovedDateIds].some((dateId) => Object.prototype.hasOwnProperty.call(voter.answers, dateId))
+  )).length;
+  const requiresDateConfirmation = datesChanged && (affectedParticipants > 0 || event.status === "confirmed");
+
+  useEffect(() => {
+    setDateChangeAccepted(false);
+  }, [dates]);
+
   const submit = async (submitEvent: FormEvent<HTMLFormElement>) => {
     submitEvent.preventDefault();
-    await onSave({
-      title: title.trim(),
-      maxPlaces: Number(maxPlaces),
-      budgetEur: budget ? Number(budget) : null,
-      responseDeadline: deadline || null,
-      allowPlaceSuggestions,
-      places: places.map((place) => ({ ...place, name: place.name.trim(), address: place.address.trim(), mapsUrl: place.mapsUrl.trim() })),
-    });
+    setLocalError("");
+    try {
+      if (requiresDateConfirmation && !dateChangeAccepted) throw new Error("Confirme l’avertissement sur les réponses avant d’enregistrer.");
+      const normalizedDates = dates.map((date) => {
+        if (event.eventType === "stay") {
+          if (!date.date || !date.endDate) throw new Error("Complète les dates de départ et de retour de chaque période.");
+          const startsAt = new Date(`${date.date}T00:00:00.000Z`);
+          const endsAt = new Date(`${date.endDate}T00:00:00.000Z`);
+          if (Number.isNaN(startsAt.getTime()) || Number.isNaN(endsAt.getTime()) || endsAt < startsAt) throw new Error("Vérifie les périodes proposées.");
+          return { ...(date.id.startsWith("new-date-") ? {} : { id: date.id }), startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() };
+        }
+        if (!date.date || !date.time) throw new Error("Complète chaque date et chaque heure.");
+        const startsAt = new Date(`${date.date}T${date.time}:00`);
+        if (Number.isNaN(startsAt.getTime())) throw new Error("Une des dates est invalide.");
+        return { ...(date.id.startsWith("new-date-") ? {} : { id: date.id }), startsAt: startsAt.toISOString(), endsAt: null };
+      });
+      await onSave({
+        title: title.trim(),
+        maxPlaces: Number(maxPlaces),
+        budgetEur: budget ? Number(budget) : null,
+        responseDeadline: deadline || null,
+        reopenConfirmed: event.status === "confirmed" && datesChanged,
+        allowPlaceSuggestions,
+        places: places.map((place) => ({ ...place, name: place.name.trim(), address: place.address.trim(), mapsUrl: place.mapsUrl.trim() })),
+        dates: normalizedDates,
+      });
+    } catch (submitError) {
+      setLocalError(submitError instanceof Error ? submitError.message : "Impossible de modifier cette sortie.");
+    }
   };
 
   return (
     <form className="event-edit-panel" onSubmit={(submitEvent) => void submit(submitEvent)}>
-      <div className="event-edit-heading"><div><span className="step-label">MODIFIER LA SORTIE</span><h3>Une info a changé ?</h3><p>Les dates proposées, les participants et leurs votes restent inchangés.</p></div><button type="button" className="icon-button" onClick={onCancel} aria-label="Fermer le formulaire">×</button></div>
+      <div className="event-edit-heading"><div><span className="step-label">MODIFIER LA SORTIE</span><h3>Une info a changé ?</h3><p>Tu peux aussi corriger, ajouter ou retirer une date.</p></div><button type="button" className="icon-button" onClick={onCancel} aria-label="Fermer le formulaire">×</button></div>
       <div className="event-edit-grid">
         <label className="field full"><span>Nom de la sortie</span><input value={title} onChange={(input) => setTitle(input.target.value)} maxLength={120} required /></label>
         <label className="field"><span>Nombre de places</span><input type="number" min={Math.max(2, participantCount)} max="200" value={maxPlaces} onChange={(input) => setMaxPlaces(input.target.value)} required /><small>Minimum actuel : {participantCount}</small></label>
@@ -1135,6 +1207,20 @@ function EditEventPanel({ event, participantCount, busy, onCancel, onSave }: {
         {PLACE_SUGGESTIONS_FEATURE_ENABLED && <label className="suggestion-toggle full"><input type="checkbox" checked={allowPlaceSuggestions} onChange={(input) => setAllowPlaceSuggestions(input.target.checked)} /><span><b>Laisser le groupe proposer un autre lieu</b><small>L’option reste facultative pour les invités. Tu gardes la décision finale.</small></span></label>}
       </div>
       <div className="edit-places"><span className="step-label">LIEU{places.length > 1 ? "X" : ""}</span>{places.map((place, index) => <fieldset key={place.id}><legend>Étape {index + 1}</legend><label className="field"><span>Nom du lieu</span><input value={place.name} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, name: input.target.value } : item))} maxLength={160} required /></label><label className="field"><span>Ville</span><input value={place.address} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, address: input.target.value } : item))} maxLength={100} required /></label><label className="field full"><span>Lien Google Maps (optionnel)</span><input type="url" value={place.mapsUrl} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, mapsUrl: input.target.value } : item))} placeholder="https://www.google.com/maps/..." /></label></fieldset>)}</div>
+      <section className="edit-dates" aria-labelledby="edit-dates-title">
+        <div><span className="step-label">{event.eventType === "stay" ? "PÉRIODES" : "DATES"}</span><h4 id="edit-dates-title">Quand aura lieu {event.eventType === "stay" ? "le séjour" : "la sortie"} ?</h4><small>Entre 1 et 4 propositions.</small></div>
+        {dates.map((date, index) => <div className={`date-input ${event.eventType === "stay" ? "stay-range" : ""}`} key={date.id}>
+          <span>{index + 1}</span>
+          <label><small>{event.eventType === "stay" ? "Départ" : "Date"}</small><input type="date" value={date.date} onChange={(input) => setDates((current) => current.map((item) => item.id === date.id ? { ...item, date: input.target.value } : item))} required /></label>
+          {event.eventType === "stay"
+            ? <label><small>Retour</small><input type="date" min={date.date || undefined} value={date.endDate} onChange={(input) => setDates((current) => current.map((item) => item.id === date.id ? { ...item, endDate: input.target.value } : item))} required /></label>
+            : <label><small>Heure</small><input type="time" value={date.time} onChange={(input) => setDates((current) => current.map((item) => item.id === date.id ? { ...item, time: input.target.value } : item))} required /></label>}
+          {dates.length > 1 && <button type="button" onClick={() => setDates((current) => current.filter((item) => item.id !== date.id))} aria-label={`Supprimer la proposition ${index + 1}`}>×</button>}
+        </div>)}
+        {dates.length < 4 && <button className="add-date" type="button" onClick={() => setDates((current) => [...current, { id: `new-date-${Date.now()}`, date: "", time: "19:30", endDate: "" }])}>＋ Ajouter {event.eventType === "stay" ? "une période" : "une date"}</button>}
+        {requiresDateConfirmation && <label className="date-change-warning"><input type="checkbox" checked={dateChangeAccepted} onChange={(input) => setDateChangeAccepted(input.target.checked)} /><span><b>{event.status === "confirmed" ? "La sortie va repasser en réponses en cours." : "Les réponses concernées seront remises à zéro."}</b><small>{affectedParticipants > 0 ? `${affectedParticipants} personne${affectedParticipants > 1 ? "s devront" : " devra"} vérifier ${affectedParticipants > 1 ? "leurs disponibilités" : "sa disponibilité"}. Les réponses aux autres dates seront conservées.` : "Il faudra repartager la sortie et son nouveau calendrier au groupe."}</small></span></label>}
+      </section>
+      {localError && <div className="form-error" role="alert">{localError}</div>}
       <div className="event-edit-actions"><button type="button" className="secondary" onClick={onCancel} disabled={busy}>Annuler</button><button type="submit" className="primary" disabled={busy}>{busy ? "Enregistrement…" : "Enregistrer les modifications"}</button></div>
     </form>
   );
@@ -1212,6 +1298,7 @@ function ManagePage({ payload, name, availableDateIds, setAvailableDateIds, avai
   const reminderText = `Petit rappel pour « ${event.title} » 👀\n\nChoisis tes ${event.eventType === "stay" ? "périodes" : "disponibilités"}${multipleSteps ? " et les étapes où tu seras là" : ""}. Ça prend 20 secondes, sans compte.`;
   const reminderMessage = `${reminderText}\n\n${shareUrl}`;
   const selectedDate = event.dates.find((date) => date.id === event.confirmedDateId);
+  const hasPendingDateAnswers = voters.some((voter) => event.dates.some((date) => !Object.prototype.hasOwnProperty.call(voter.answers, date.id)));
   const rowStyle = { gridTemplateColumns: `1.6fr repeat(${event.dates.length}, minmax(120px, 1fr))` };
   const stageRowStyle = { gridTemplateColumns: `1.6fr repeat(${event.places.length}, minmax(150px, 1fr))` };
   const shareReminder = async () => {
@@ -1235,7 +1322,7 @@ function ManagePage({ payload, name, availableDateIds, setAvailableDateIds, avai
       <div className="management-head"><div><span className="step-label">PAGE PRIVÉE · ORGANISATEUR</span><h2>{event.title}</h2><p>{event.city} · {event.maxPlaces} places{event.responseDeadline ? ` · Réponses jusqu’au ${formatDate(`${event.responseDeadline}T12:00:00`, { day: "numeric", month: "long" })}` : ""}</p></div><div className="status-panel"><span>{event.status === "confirmed" ? `✓ ${event.eventType === "stay" ? "Période" : "Date"} confirmée` : "● Réponses en cours"}</span><b>{capacityCount} disponibles<small>{capacityDateLabel} · {event.maxPlaces} max</small></b></div></div>
       <div className="manage-toolbar"><div><b>{payload.summary.guestCount} invité{payload.summary.guestCount > 1 ? "s ont" : " a"} répondu · ton vote est inclus</b><span>Les résultats sont lus directement depuis BIMA.</span></div><button className="secondary" onClick={() => setEditing((value) => !value)}>{editing ? "Fermer" : "Modifier les informations"}</button><button className="secondary" onClick={() => void onCopy(shareUrl, "Lien invité copié")}>{copied ? "Copié" : "Copier le lien"}</button><button className="dark-button" type="button" onClick={() => void shareReminder()}>↗ Partager la relance</button></div>
       {shareFallbackVisible && <section className="share-fallback" aria-label="Options pour partager la relance"><div><b>Le partage direct n’est pas disponible ici.</b><span>Copie la relance complète, puis envoie-la où tu veux.</span></div><button className="dark-button" type="button" onClick={() => void onCopy(reminderMessage, "Relance copiée · tu peux maintenant la partager")}>Copier le message</button><button className="secondary" type="button" onClick={() => void onCopy(shareUrl, "Lien invité copié")}>Copier seulement le lien</button></section>}
-      {editing && <EditEventPanel event={event} participantCount={payload.summary.participantCount} busy={busy} onCancel={() => setEditing(false)} onSave={async (input) => { await onUpdate(input); setEditing(false); }} />}
+      {editing && <EditEventPanel event={event} participantCount={payload.summary.participantCount} voters={voters} busy={busy} onCancel={() => setEditing(false)} onSave={async (input) => { await onUpdate(input); setEditing(false); }} />}
       <NotificationPreferencesPanel preferences={payload.notificationPreferences || { newResponses: true, reminders: true, placeSuggestions: true, active: false }} busy={busy} onSave={onUpdateNotifications} />
       {PLACE_SUGGESTIONS_FEATURE_ENABLED && <PlaceSuggestionsPanel event={event} suggestions={payload.placeSuggestions || []} busy={busy} onReview={onReviewPlaceSuggestion} />}
       <section className="participant-manager" aria-labelledby="participant-manager-title"><div><span className="step-label">LISTE DES PARTICIPANTS</span><h3 id="participant-manager-title">Qui est dans la boucle ?</h3><p>Une erreur ou un doublon ? Tu peux retirer un invité ici.</p></div><div className="participant-list">{voters.map((voter) => <div key={voter.id}><span className={voter.role === "organizer" ? "organizer-color" : "blue"}>{voter.name.slice(0, 2).toUpperCase()}</span><p><b>{voter.name}</b><small>{voter.role === "organizer" ? "Organisateur · toi" : "Invité"}</small></p>{voter.role === "guest" ? <button type="button" onClick={() => void onDeleteParticipant(voter)} disabled={busy} aria-label={`Retirer ${voter.name}`}>Retirer</button> : <em>Protégé</em>}</div>)}</div></section>
@@ -1244,7 +1331,7 @@ function ManagePage({ payload, name, availableDateIds, setAvailableDateIds, avai
       {multipleSteps && <div className="organizer-vote organizer-stage-vote"><div className="organizer-vote-heading"><span className="organizer-avatar">{name.slice(0, 2).toUpperCase() || "OR"}</span><div><b>Ma présence par étape</b><small>Après tes dates, choisis les parties auxquelles tu participeras.</small></div><em>ORGANISATEUR</em></div><div className="organizer-options stage-organizer-options">{event.places.map((place, index) => { const selected = availablePlaceIds.includes(place.id); return <button type="button" className={selected ? "selected" : ""} key={place.id} onClick={() => setAvailablePlaceIds(selected ? availablePlaceIds.filter((id) => id !== place.id) : [...availablePlaceIds, place.id])} aria-pressed={selected}><span>ÉTAPE {index + 1}</span><b>{selected ? `✓ ${place.name}` : "× Absent·e"}</b></button>; })}</div></div>}
       {error && <div className="form-error" role="alert">{error}</div>}
       {event.status !== "confirmed" && <button className="primary organizer-save" onClick={() => void onSaveVote()} disabled={busy}>{busy ? "Enregistrement…" : "Enregistrer mon vote"}</button>}
-      <div className="matrix-card"><div className="matrix-title"><h3>{event.status === "confirmed" ? "Résultats des disponibilités" : `Choisis la meilleure ${event.eventType === "stay" ? "période" : "date"}`}</h3><span>Les scores se mettent à jour après chaque réponse</span></div><div className="matrix-scroll"><div className="matrix dynamic-matrix"><div className="matrix-row matrix-header" style={rowStyle}><div>PARTICIPANTS</div>{event.dates.map((date) => <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><span>{event.eventType === "stay" ? "SÉJOUR" : dateParts(date.startsAt).day}</span><b>{formatEventDate(date, event.eventType, true).toUpperCase()}</b><small>{event.eventType === "stay" ? "Départ → retour" : dateParts(date.startsAt).time}</small>{date.availableCount === bestCount && <em>MEILLEURE</em>}</div>)}</div>{voters.map((voter) => <div className={`matrix-row ${voter.role === "organizer" ? "organizer-row" : ""}`} style={rowStyle} key={voter.id}><div className="person"><i className={voter.role === "organizer" ? "organizer-color" : "blue"}>{voter.name.slice(0, 2).toUpperCase()}</i><b>{voter.name}{voter.role === "organizer" && <span>Vous</span>}</b></div>{event.dates.map((date) => <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><span className={voter.answers[date.id] ? "check" : "cross"}>{voter.answers[date.id] ? "✓" : "×"}</span></div>)}</div>)}<div className="matrix-row totals" style={rowStyle}><div>DISPONIBLES</div>{event.dates.map((date) => <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><b>{date.availableCount}/{payload.summary.participantCount}</b></div>)}</div>{event.status !== "confirmed" && <div className="matrix-row actions" style={rowStyle}><div /><>{event.dates.map((date) => <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><button className={date.availableCount === bestCount ? "primary" : "secondary"} onClick={() => void onConfirm(date.id)} disabled={busy}>Confirmer</button></div>)}</></div>}</div></div></div>
+      <div className="matrix-card"><div className="matrix-title"><h3>{event.status === "confirmed" ? "Résultats des disponibilités" : `Choisis la meilleure ${event.eventType === "stay" ? "période" : "date"}`}</h3><span>{hasPendingDateAnswers ? "… signifie que la personne doit répondre à cette date" : "Les scores se mettent à jour après chaque réponse"}</span></div><div className="matrix-scroll"><div className="matrix dynamic-matrix"><div className="matrix-row matrix-header" style={rowStyle}><div>PARTICIPANTS</div>{event.dates.map((date) => <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><span>{event.eventType === "stay" ? "SÉJOUR" : dateParts(date.startsAt).day}</span><b>{formatEventDate(date, event.eventType, true).toUpperCase()}</b><small>{event.eventType === "stay" ? "Départ → retour" : dateParts(date.startsAt).time}</small>{date.availableCount === bestCount && <em>MEILLEURE</em>}</div>)}</div>{voters.map((voter) => <div className={`matrix-row ${voter.role === "organizer" ? "organizer-row" : ""}`} style={rowStyle} key={voter.id}><div className="person"><i className={voter.role === "organizer" ? "organizer-color" : "blue"}>{voter.name.slice(0, 2).toUpperCase()}</i><b>{voter.name}{voter.role === "organizer" && <span>Vous</span>}</b></div>{event.dates.map((date) => { const hasAnswered = Object.prototype.hasOwnProperty.call(voter.answers, date.id); return <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><span className={hasAnswered ? (voter.answers[date.id] ? "check" : "cross") : "pending-answer"}>{hasAnswered ? (voter.answers[date.id] ? "✓" : "×") : "…"}</span></div>; })}</div>)}<div className="matrix-row totals" style={rowStyle}><div>DISPONIBLES</div>{event.dates.map((date) => <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><b>{date.availableCount}/{payload.summary.participantCount}</b></div>)}</div>{event.status !== "confirmed" && <div className="matrix-row actions" style={rowStyle}><div /><>{event.dates.map((date) => <div className={date.availableCount === bestCount ? "best" : ""} key={date.id}><button className={date.availableCount === bestCount ? "primary" : "secondary"} onClick={() => void onConfirm(date.id)} disabled={busy}>Confirmer</button></div>)}</></div>}</div></div></div>
       {multipleSteps && <div className="matrix-card stage-matrix-card"><div className="matrix-title"><h3>Qui vient à quelle étape ?</h3><span>Chacun peut participer à seulement une partie de la sortie.</span></div><div className="matrix-scroll"><div className="matrix stage-matrix"><div className="matrix-row matrix-header" style={stageRowStyle}><div>PARTICIPANTS</div>{event.places.map((place, index) => <div key={place.id}><span>ÉTAPE {index + 1}</span><b>{place.name}</b></div>)}</div>{voters.map((voter) => <div className={`matrix-row ${voter.role === "organizer" ? "organizer-row" : ""}`} style={stageRowStyle} key={voter.id}><div className="person"><i className={voter.role === "organizer" ? "organizer-color" : "coral"}>{voter.name.slice(0, 2).toUpperCase()}</i><b>{voter.name}</b></div>{event.places.map((place) => <div key={place.id}><span className={voter.stageAnswers[place.id] ? "check" : "cross"}>{voter.stageAnswers[place.id] ? "✓" : "×"}</span></div>)}</div>)}<div className="matrix-row totals" style={stageRowStyle}><div>PRÉSENTS PAR ÉTAPE</div>{event.places.map((place) => <div key={place.id}><b>{place.attendingCount}/{payload.summary.participantCount}</b></div>)}</div></div></div></div>}
       <ItineraryPreview places={event.places} />
       <div className="danger-zone"><div><b>Supprimer cette sortie</b><span>Efface définitivement les lieux, dates, participants et réponses.</span></div><button type="button" onClick={() => void onDelete()} disabled={busy}>Supprimer définitivement</button></div>

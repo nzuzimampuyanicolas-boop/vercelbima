@@ -265,16 +265,22 @@ test("adds stays without changing historical outings", async () => {
   assert.match(edgeApi, /addUtcDays\(selectedDate\.endsAt, 1\)/);
 });
 
-test("lets only the organizer edit event details without replacing dates or votes", async () => {
-  const [page, proxyRoute, shared, edgeApi] = await Promise.all([
+test("lets only the organizer safely edit event details and dates", async () => {
+  const [page, css, proxyRoute, shared, edgeApi, dateMigration] = await Promise.all([
     source("app/page.tsx"),
+    source("app/globals.css"),
     source("app/api/events/[slug]/route.ts"),
     source("app/api/_shared.ts"),
     source("supabase/functions/bima-api/index.ts"),
+    source("supabase/migrations/20260927212709_edit_event_dates.sql"),
   ]);
 
   assert.match(page, /Modifier les informations/);
-  assert.match(page, /Les dates proposées, les participants et leurs votes restent inchangés/);
+  assert.match(page, /corriger, ajouter ou retirer une date/);
+  assert.match(page, /Les réponses concernées seront remises à zéro/);
+  assert.match(page, /La sortie va repasser en réponses en cours/);
+  assert.match(page, /pending-answer/);
+  assert.match(css, /\.date-change-warning/);
   assert.match(page, /method: "PATCH"/);
   assert.match(proxyRoute, /export async function PATCH/);
   assert.match(shared, /GET, POST, PATCH, OPTIONS/);
@@ -283,6 +289,11 @@ test("lets only the organizer edit event details without replacing dates or vote
   assert.match(edgeApi, /maxPlaces < participantCount/);
   assert.match(edgeApi, /Le nombre d’étapes ne peut pas être modifié ici/);
   assert.match(edgeApi, /submittedIds\.some\(\(id\) => !existingIds\.has\(id\)\)/);
+  assert.match(edgeApi, /bima_update_event_dates/);
+  assert.match(edgeApi, /Rouvre les réponses avant de modifier les dates/);
+  assert.match(dateMigration, /delete from public\.bima_date_votes/i);
+  assert.match(dateMigration, /confirmed_date_id = case when p_reopen_confirmed then null/i);
+  assert.match(dateMigration, /grant execute on function public\.bima_update_event_dates.*to service_role/is);
   assert.match(edgeApi, /request\.method === "PATCH" && !action/);
   assert.match(edgeApi, /GET, POST, PATCH, OPTIONS/);
 });

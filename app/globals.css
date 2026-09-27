@@ -248,7 +248,17 @@ button { cursor: pointer; }
 .edit-places { margin-top: 23px; }
 .edit-places fieldset { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 10px 0 0; padding: 17px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
 .edit-places legend { padding: 0 7px; font-weight: 800; }
+.edit-dates { margin-top: 24px; padding-top: 22px; border-top: 1px solid var(--line); }
+.edit-dates > div:first-child { margin-bottom: 13px; }
+.edit-dates h4 { margin: 6px 0 3px; font-size: 18px; }
+.edit-dates > div:first-child > small { color: var(--muted); font-size: 11px; }
+.date-change-warning { display: flex; align-items: flex-start; gap: 11px; margin-top: 14px; padding: 14px; border: 1px solid #e1a729; border-radius: 10px; background: rgba(244,185,66,.18); }
+.date-change-warning input { margin-top: 3px; accent-color: var(--blue); }
+.date-change-warning span { display: grid; gap: 4px; }
+.date-change-warning b { font-size: 12px; }
+.date-change-warning small { color: var(--muted); font-size: 11px; line-height: 1.45; }
 .event-edit-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.pending-answer { color: #8a8175; font-size: 19px; }
 .notification-preferences { display: grid; grid-template-columns: minmax(220px,.75fr) 1.25fr auto; gap: 22px; align-items: center; margin: 14px 0; padding: 20px 22px; border: 1px solid rgba(20,84,93,.25); border-radius: 13px; background: rgba(20,84,93,.06); }
 .notification-preferences h3 { margin: 6px 0 4px; font-size: 18px; }
 .notification-preferences p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
@@ -355,7 +365,7 @@ button { cursor: pointer; }
   .mini-date { grid-template-columns: 43px 1fr 30px; }.faces { display: none; }.phone-head { padding: 18px 15px; }
   .steps { display: none; }.form-page { padding: 32px 20px 70px; }.form-intro h2, .center-page h2, .management-head h2 { font-size: 34px; }.form-grid { grid-template-columns: 1fr; }.field.full { grid-column: auto; }
   .event-type-picker { grid-template-columns: 1fr; }
-  .date-input { grid-template-columns: 28px 1fr 1fr; }.date-input > button { display: none; }.create-footer { grid-template-columns: 1fr; padding: 17px; }.create-footer .primary { grid-column: auto; width: 100%; }
+  .date-input { grid-template-columns: 28px 1fr 30px; align-items: center; }.date-input label { grid-column: 2; }.date-input > span { grid-column: 1; grid-row: 1 / span 2; }.date-input > button { display: block; grid-column: 3; grid-row: 1 / span 2; }.create-footer { grid-template-columns: 1fr; padding: 17px; }.create-footer .primary { grid-column: auto; width: 100%; }
   .center-page { padding: 55px 20px; }.share-actions { grid-template-columns: 1fr; }.invitation-card { padding: 20px 17px; }.organizer-access { grid-template-columns: 1fr; padding: 19px 17px; }.organizer-access-button { width: 100%; }.token-card p { font-size: 12px; }
   .confirmation-email-card { padding: 19px 16px; }.confirmation-email-card form > div { grid-template-columns: 1fr; }.confirmation-email-card form .primary { width: 100%; }.participant-create-card { align-items: stretch; flex-direction: column; text-align: center; }.participant-create-card > .primary { width: 100%; }
   .place-suggestion-card { padding: 19px 16px; }.suggestion-fields { grid-template-columns: 1fr; }.place-suggestion-card form > .secondary { width: 100%; }
