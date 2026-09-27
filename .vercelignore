@@ -1,2 +1,22 @@
 .codex-release-recovery-*/
 handoffs/
+
+# Local dependencies and build artifacts
+node_modules/
+.pnpm-store/
+.next/
+.git/
+
+# Product work files that are not part of the deployed Next.js app
+acquisition/
+bima-promo/
+content-os/
+exports/
+outputs/
+videos/
+.agents/
+
+# Local media and temporary captures
+*.mp4
+*.srt
+.tmp-*

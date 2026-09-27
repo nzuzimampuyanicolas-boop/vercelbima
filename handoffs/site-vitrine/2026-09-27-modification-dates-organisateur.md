@@ -4,7 +4,7 @@ Date : 27 septembre 2026
 
 ## Statut
 
-La fonctionnalité est implémentée dans une branche de prévisualisation et vérifiée sur la base Supabase `Preview BIMA`. Elle n’est pas publiée en production à ce stade.
+La fonctionnalité est implémentée dans une branche de prévisualisation, vérifiée sur la base Supabase `Preview BIMA` et déployée sur une Preview Vercel protégée. Elle n’est pas publiée en production à ce stade.
 
 ## Changement terminé
 
@@ -31,4 +31,8 @@ Dans une démonstration du parcours organisateur, montrer brièvement que les pr
 
 ## URL publique à tester
 
-Pas encore disponible. Le backend de prévisualisation est prêt, mais le frontend Vercel de test n’a pas été déployé.
+Preview Vercel protégée, réservée aux tests de l’équipe BIMA :
+
+https://bima-p8of31zud-bima6.vercel.app
+
+Cette URL utilise exclusivement le backend Supabase `Preview BIMA`. Elle ne doit pas être communiquée comme URL publique du produit ni ajoutée à la vitrine.
