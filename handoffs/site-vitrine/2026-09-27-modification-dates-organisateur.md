@@ -1,14 +1,14 @@
 # Transmission Site vitrine — modification des dates par l’organisateur
 
-Date : 27 septembre 2026
+Date : 28 septembre 2026
 
 ## Statut
 
-La fonctionnalité est implémentée dans une branche de prévisualisation et vérifiée sur la base Supabase `Preview BIMA`. Elle n’est pas publiée en production à ce stade.
+La fonctionnalité est publiée et vérifiée en production sur BIMA.
 
 ## Changement terminé
 
-Depuis sa page privée de gestion, l’organisateur peut désormais préparer les actions suivantes :
+Depuis sa page privée de gestion, l’organisateur peut désormais effectuer les actions suivantes :
 
 - corriger une date ou une période de séjour ;
 - ajouter une nouvelle proposition, dans la limite de quatre ;
@@ -23,12 +23,20 @@ L’organisateur peut corriger une erreur ou adapter la sortie sans devoir suppr
 
 ## Mise à jour obligatoire de la vitrine
 
-Aucune pour le moment. Ne pas annoncer cette fonctionnalité tant que la prévisualisation frontend n’a pas été validée puis publiée en production.
+La vitrine peut désormais indiquer que l’organisateur peut corriger, ajouter ou supprimer les dates proposées depuis son lien privé de gestion, sans recréer la sortie.
 
-## Suggestion facultative après publication
+Formulation recommandée :
+
+> Un changement de programme ? Ajuste les dates depuis ta page de gestion. Les réponses encore valables sont conservées.
+
+## Suggestion facultative
 
 Dans une démonstration du parcours organisateur, montrer brièvement que les propositions de dates restent ajustables depuis le lien privé de gestion.
 
 ## URL publique à tester
 
-Pas encore disponible. Le backend de prévisualisation est prêt, mais le frontend Vercel de test n’a pas été déployé.
+https://bima-app-sigma.vercel.app
+
+## À ne pas annoncer
+
+Ne pas annoncer les propositions de lieux par les invités : cette expérimentation n’a pas été incluse dans cette mise en production.
