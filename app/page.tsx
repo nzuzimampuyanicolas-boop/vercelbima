@@ -1047,9 +1047,10 @@ function EditEventPanel({ event, participantCount, voters, busy, onCancel, onSav
   )).length;
   const requiresDateConfirmation = datesChanged && (affectedParticipants > 0 || event.status === "confirmed");
 
-  useEffect(() => {
+  const updateDates = (nextDates: DateDraft[]) => {
+    setDates(nextDates);
     setDateChangeAccepted(false);
-  }, [dates]);
+  };
 
   const submit = async (submitEvent: FormEvent<HTMLFormElement>) => {
     submitEvent.preventDefault();
@@ -1097,13 +1098,13 @@ function EditEventPanel({ event, participantCount, voters, busy, onCancel, onSav
         <div><span className="step-label">{event.eventType === "stay" ? "PÉRIODES" : "DATES"}</span><h4 id="edit-dates-title">Quand aura lieu {event.eventType === "stay" ? "le séjour" : "la sortie"} ?</h4><small>Entre 1 et 4 propositions.</small></div>
         {dates.map((date, index) => <div className={`date-input ${event.eventType === "stay" ? "stay-range" : ""}`} key={date.id}>
           <span>{index + 1}</span>
-          <label><small>{event.eventType === "stay" ? "Départ" : "Date"}</small><input type="date" value={date.date} onChange={(input) => setDates((current) => current.map((item) => item.id === date.id ? { ...item, date: input.target.value } : item))} required /></label>
+          <label><small>{event.eventType === "stay" ? "Départ" : "Date"}</small><input type="date" value={date.date} onChange={(input) => updateDates(dates.map((item) => item.id === date.id ? { ...item, date: input.target.value } : item))} required /></label>
           {event.eventType === "stay"
-            ? <label><small>Retour</small><input type="date" min={date.date || undefined} value={date.endDate} onChange={(input) => setDates((current) => current.map((item) => item.id === date.id ? { ...item, endDate: input.target.value } : item))} required /></label>
-            : <label><small>Heure</small><input type="time" value={date.time} onChange={(input) => setDates((current) => current.map((item) => item.id === date.id ? { ...item, time: input.target.value } : item))} required /></label>}
-          {dates.length > 1 && <button type="button" onClick={() => setDates((current) => current.filter((item) => item.id !== date.id))} aria-label={`Supprimer la proposition ${index + 1}`}>×</button>}
+            ? <label><small>Retour</small><input type="date" min={date.date || undefined} value={date.endDate} onChange={(input) => updateDates(dates.map((item) => item.id === date.id ? { ...item, endDate: input.target.value } : item))} required /></label>
+            : <label><small>Heure</small><input type="time" value={date.time} onChange={(input) => updateDates(dates.map((item) => item.id === date.id ? { ...item, time: input.target.value } : item))} required /></label>}
+          {dates.length > 1 && <button type="button" onClick={() => updateDates(dates.filter((item) => item.id !== date.id))} aria-label={`Supprimer la proposition ${index + 1}`}>×</button>}
         </div>)}
-        {dates.length < 4 && <button className="add-date" type="button" onClick={() => setDates((current) => [...current, { id: `new-date-${Date.now()}`, date: "", time: "19:30", endDate: "" }])}>＋ Ajouter {event.eventType === "stay" ? "une période" : "une date"}</button>}
+        {dates.length < 4 && <button className="add-date" type="button" onClick={() => updateDates([...dates, { id: `new-date-${Date.now()}`, date: "", time: "19:30", endDate: "" }])}>＋ Ajouter {event.eventType === "stay" ? "une période" : "une date"}</button>}
         {requiresDateConfirmation && <label className="date-change-warning"><input type="checkbox" checked={dateChangeAccepted} onChange={(input) => setDateChangeAccepted(input.target.checked)} /><span><b>{event.status === "confirmed" ? "La sortie va repasser en réponses en cours." : "Les réponses concernées seront remises à zéro."}</b><small>{affectedParticipants > 0 ? `${affectedParticipants} personne${affectedParticipants > 1 ? "s devront" : " devra"} vérifier ${affectedParticipants > 1 ? "leurs disponibilités" : "sa disponibilité"}. Les réponses aux autres dates seront conservées.` : "Il faudra repartager la sortie et son nouveau calendrier au groupe."}</small></span></label>}
       </section>
       {localError && <div className="form-error" role="alert">{localError}</div>}
