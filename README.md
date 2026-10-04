@@ -70,6 +70,16 @@ La récupération ne révèle jamais si une adresse existe. La route publique tr
 
 La vue administrateur expose le statut dérivé du système existant : `En cours`, `Confirmée` ou `Abandonnée` lorsque toutes les dates sont passées sans confirmation. Elle affiche aussi la date prévue et indique les sorties confirmées prêtes pour une relance feedback deux jours après leur fin.
 
+## Partage du calendrier après confirmation
+
+Depuis la page privée de gestion, une sortie confirmée propose « Copier le lien du calendrier » comme action principale, « Partager le lien du calendrier » via le partage natif du téléphone et « Ajouter à mon calendrier » pour l’organisateur. Le lien copié ou partagé est l’URL publique `/api/events/<slug>/calendar`, sans jeton privé de gestion ni lien de vote.
+
+Le partage inclut un court message avec le titre et la date ou la période. Si le partage natif est absent ou échoue, l’organisateur peut copier le message et le lien. Si le presse-papiers refuse l’accès, un champ sélectionnable permet de copier manuellement le lien. Une annulation du partage n’est pas traitée comme une erreur. Les actions de relance de vote sont masquées après confirmation.
+
+Chaque destinataire doit ouvrir le lien et accepter l’importation du fichier `.ics` dans son calendrier. Aucune inscription n’est nécessaire ; aucun ajout automatique ni synchronisation continue n’est promis. Les navigateurs intégrés aux messageries peuvent demander d’ouvrir le lien dans le navigateur habituel. La fonctionnalité réutilise l’API calendrier existante : aucune migration, aucun nouvel envoi d’e-mail et aucune modification des données des sorties historiques.
+
+Vérification navigateur : démarrer l’application compilée sur le port 3014, puis exécuter `pnpm test:calendar-sharing` avec Playwright disponible (ou `BIMA_PLAYWRIGHT_MODULE` pointant vers son module `index.mjs`). `BIMA_TEST_URL` permet de changer l’URL et `BIMA_BROWSER_CHANNEL=msedge` ou `chrome` d’utiliser un navigateur installé. Ce test simule une sortie, les réponses API, le presse-papiers et le partage natif ; il n’écrit aucune donnée de production et ne remplace pas les essais sur un vrai téléphone et dans les messageries.
+
 ## Modèle temporel
 
 Deux formats d’événement sont pris en charge :
