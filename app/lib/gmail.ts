@@ -26,6 +26,7 @@ export type ManagementEmailResult = {
 type MailContent = { to: string; subject: string; text: string; html: string };
 
 async function sendBimaEmail(content: MailContent) {
+  if (process.env.VERCEL_ENV === "preview") throw new Error("Les e-mails sont désactivés sur la preview.");
   const user = (process.env.GMAIL_USER || GMAIL_SENDER).trim().toLowerCase();
   const password = (process.env.GMAIL_APP_PASSWORD || "").replaceAll(" ", "");
   if (user !== GMAIL_SENDER || !password) throw new Error("BIMA email is not configured.");
@@ -50,6 +51,7 @@ export async function sendManagementEmail({
   eventTitle: string;
   manageUrl: string;
 }): Promise<ManagementEmailResult> {
+  if (process.env.VERCEL_ENV === "preview") return {sent: false, warning: "Preview : aucun e-mail envoyé. Ouvre ta gestion et conserve son lien pour tes tests."};
   const user = (process.env.GMAIL_USER || GMAIL_SENDER).trim().toLowerCase();
   const password = (process.env.GMAIL_APP_PASSWORD || "").replaceAll(" ", "");
 

@@ -1,4 +1,5 @@
 import { sendOrganizerNotificationEmail, type OrganizerNotificationKind } from "@/app/lib/gmail";
+import { backendBaseUrl } from "./preview-backend";
 
 const DEFAULT_BIMA_API_URL = "https://ebilhzvgvinbpmmpezua.supabase.co/functions/v1/bima-api";
 const DEFAULT_PUBLIC_URL = "https://bima-app-sigma.vercel.app";
@@ -25,7 +26,7 @@ function notificationSecret() {
 }
 
 function backendUrl(path: string) {
-  const base = (process.env.BIMA_API_URL || DEFAULT_BIMA_API_URL).replace(/\/$/, "");
+  const base = backendBaseUrl(DEFAULT_BIMA_API_URL);
   return `${base}${path}`;
 }
 
@@ -40,6 +41,7 @@ function bestDateLabel(job: NotificationJob) {
 }
 
 export async function processPendingNotifications(options: { slug?: string; referenceDate?: string } = {}) {
+  if (process.env.VERCEL_ENV === "preview") return {processed: 0, sent: 0, failed: 0};
   const secret = notificationSecret();
   const response = await fetch(backendUrl("/api/notifications/process"), {
     method: "POST",

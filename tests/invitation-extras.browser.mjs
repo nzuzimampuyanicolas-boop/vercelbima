@@ -1,0 +1,64 @@
+import { chromium } from 'file:///C:/Users/ASUS/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
+import assert from 'node:assert/strict';
+const base=process.env.BIMA_TEST_URL || 'http://localhost:3020';
+const browser=await chromium.launch({channel:'msedge',headless:true});
+let created;
+const failures=[];
+try{
+ const context=await browser.newContext({viewport:{width:390,height:844}});
+ const p=await context.newPage(); p.on('pageerror',error=>failures.push(error.message));
+ await p.goto(base+'/creer');
+ await p.getByLabel('Nom de la sortie',{exact:true}).fill('QA soirée preview');
+ await p.getByLabel('Ton prénom',{exact:true}).fill('Nicolas');
+ await p.getByLabel('Ton e-mail',{exact:true}).fill(`browser-${Date.now()}@example.com`);
+ await p.getByLabel(/Lien de billetterie/).fill('https://example.com/billets');
+ await p.getByRole('checkbox',{name:/Montrer les prénoms/}).check();
+ await p.getByLabel('Nom du lieu de l’étape 1').fill('Club test');
+ await p.getByLabel('Ville de l’étape 1').fill('Paris');
+ await p.locator('.date-input input[type=date]').fill(new Date(Date.now()+22*86400000).toISOString().slice(0,10));
+ const response=p.waitForResponse(r=>r.url().endsWith('/api/events') && r.request().method()==='POST');
+ await p.getByRole('button',{name:/Créer la sortie et obtenir/}).click();
+ const r=await response; created=await r.json(); assert.equal(r.status(),201,JSON.stringify(created));
+ assert.equal(created.emailSent,false);
+ await p.getByRole('button',{name:'Accéder à ma page de gestion →'}).click();
+ await p.getByRole('button',{name:'Modifier les informations'}).waitFor();
+ const guestContext=await browser.newContext({viewport:{width:390,height:844}});
+ const guest=await guestContext.newPage(); guest.on('pageerror',error=>failures.push(error.message));
+ await guest.goto(base+created.sharePath);
+ await guest.getByRole('region',{name:'La sortie en un coup d’œil'}).waitFor();
+ await guest.getByText(/Ton prénom sera visible/).waitFor();
+ await guest.getByLabel('Ton prénom',{exact:true}).fill('Camille');
+ await guest.locator('.availability').first().click();
+ await guest.getByRole('button',{name:/Valider mes réponses/}).click();
+ await guest.getByRole('heading',{name:/Réponse enregistrée/}).waitFor();
+ const reader=await browser.newPage({viewport:{width:390,height:844}});
+ await reader.goto(base+created.sharePath);
+ await reader.locator('.available-names').filter({hasText:'Camille'}).waitFor();
+ assert.equal(await reader.getByRole('link',{name:/Voir les billets/}).getAttribute('href'),'https://example.com/billets');
+ for(const width of [320,390,1280]){
+  await reader.setViewportSize({width,height:844});
+  assert.equal(await reader.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`overflow ${width}`);
+ }
+ await reader.setViewportSize({width:390,height:844});
+ await reader.screenshot({path:'C:/Users/ASUS/Documents/BIMA/outputs/invitation-real-mobile.png',fullPage:true});
+ await p.reload();
+ await p.getByRole('button',{name:'Modifier les informations'}).click();
+ await p.getByLabel(/Lien de billetterie/).fill('https://example.com/nouvelle-billetterie');
+ await p.getByRole('checkbox',{name:/Montrer les prénoms/}).uncheck();
+ await p.locator('.event-edit-panel button[type=submit]').click();
+ await p.locator('.event-edit-panel').waitFor({state:'hidden'});
+ await reader.reload();
+ await reader.getByRole('link',{name:/Voir les billets/}).waitFor();
+ assert.equal(await reader.locator('.available-names').count(),0);
+ assert.equal(await reader.getByRole('link',{name:/Voir les billets/}).getAttribute('href'),'https://example.com/nouvelle-billetterie');
+ await p.getByRole('button',{name:'Confirmer',exact:true}).click();
+ await p.getByRole('button',{name:'Copier le lien du calendrier'}).waitFor();
+ await reader.reload();
+ await reader.getByRole('link',{name:/Ajouter au calendrier/}).waitFor();
+ assert.equal(await reader.getByRole('link',{name:/Voir les billets/}).getAttribute('href'),'https://example.com/nouvelle-billetterie');
+ assert.deepEqual(failures,[]);
+ console.log('Parcours navigateur réel OK : création → gestion → invité sans compte → vote → prénom public → modification visibilité/billetterie → confirmation → calendrier et billetterie. Aucun débordement 320/390/1280.');
+}finally{
+ if(created?.manageToken){const response=await fetch(`https://msmnpgoggvogslvkfgwu.supabase.co/functions/v1/bima-ux-preview/api/events/${created.event.slug}/delete`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({manageToken:created.manageToken})});assert.equal(response.status,200);}
+ await browser.close();
+}

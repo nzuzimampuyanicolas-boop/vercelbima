@@ -47,6 +47,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="fr">
       <body>
+        {process.env.VERCEL_ENV === "preview" && <div className="preview-environment">PREVIEW · Base de test · Aucun e-mail envoyé · Conserve ton lien de gestion</div>}
         {children}
         <Analytics />
         <SpeedInsights />

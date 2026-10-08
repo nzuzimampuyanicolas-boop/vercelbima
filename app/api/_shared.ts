@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { backendBaseUrl } from "@/app/lib/preview-backend";
 
 const DEFAULT_BIMA_API_URL =
   "https://ebilhzvgvinbpmmpezua.supabase.co/functions/v1/bima-api";
@@ -52,7 +53,7 @@ export function bimaUpstreamResponseHeaders(upstream: Response) {
 }
 
 export function bimaBackendUrl(path: string) {
-  const baseUrl = (process.env.BIMA_API_URL || DEFAULT_BIMA_API_URL).replace(/\/$/, "");
+  const baseUrl = backendBaseUrl(DEFAULT_BIMA_API_URL);
   return `${baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
 }
 
