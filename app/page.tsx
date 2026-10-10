@@ -720,7 +720,7 @@ function CreatePage({
   const [organizerName, setOrganizerName] = useState("");
   const [organizerEmail, setOrganizerEmail] = useState("");
   const [ticketUrl, setTicketUrl] = useState("");
-  const [showAvailableNames, setShowAvailableNames] = useState(false);
+  const [showAvailableNames, setShowAvailableNames] = useState(true);
   const [maxPlaces, setMaxPlaces] = useState("8");
   const [budget, setBudget] = useState("30");
   const [deadline, setDeadline] = useState("");

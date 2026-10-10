@@ -12,7 +12,7 @@ try{
  await p.getByLabel('Ton prénom',{exact:true}).fill('Nicolas');
  await p.getByLabel('Ton e-mail',{exact:true}).fill(`browser-${Date.now()}@example.com`);
  await p.getByLabel(/Lien de billetterie/).fill('https://example.com/billets');
- await p.getByRole('checkbox',{name:/Montrer les prénoms/}).check();
+ assert.equal(await p.getByRole('checkbox',{name:/Montrer les prénoms/}).isChecked(),true);
  await p.getByLabel('Nom du lieu de l’étape 1').fill('Club test');
  await p.getByLabel('Ville de l’étape 1').fill('Paris');
  await p.locator('.date-input input[type=date]').fill(new Date(Date.now()+22*86400000).toISOString().slice(0,10));
