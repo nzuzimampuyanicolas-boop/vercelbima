@@ -960,7 +960,6 @@ function RespondPage({ payload, name, setName, availableDateIds, setAvailableDat
         {error && <div className="form-error" role="alert">{error}</div>}
         <button className="primary full-button" onClick={() => void onSubmit()} disabled={busy}>{busy ? "Enregistrement…" : payload.me ? "Mettre à jour mes réponses" : "Valider mes réponses"} <span>→</span></button>
         <p className="privacy">Aucun compte. L’e-mail n’est proposé qu’après ta réponse et reste facultatif.</p>
-        <TicketLink url={event.ticketUrl} />
       </div>
     </section>
   );
@@ -998,6 +997,7 @@ function SavedPage({ payload, participantToken, participantShortCode, copied, on
     <div className="success-mark pop">✓</div>
     <h2>Réponse enregistrée ! 🎉</h2>
     <p className="lead">Tes disponibilités ont bien été envoyées à l’organisateur.</p>
+    {payload.event.dates.some(date => payload.me?.answers[date.id] === true) && <TicketLink url={payload.event.ticketUrl} afterResponse />}
 
     <section className="confirmation-email-card" aria-labelledby="confirmation-email-title">
       {emailSaved ? <div className="confirmation-email-success" role="status"><span>✓</span><div><h3>Parfait !</h3><p>On te préviendra quand {isStay ? "le séjour sera confirmé" : "la sortie sera confirmée"}.</p></div></div> : <>

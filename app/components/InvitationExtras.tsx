@@ -10,12 +10,12 @@ export function InvitationOptions({ticketUrl, setTicketUrl, showNames, setShowNa
   </div>;
 }
 
-export function TicketLink({url}: {url?: string | null}) {
+export function TicketLink({url, afterResponse = false}: {url?: string | null; afterResponse?: boolean}) {
   if (!url) return null;
   let parsed: URL;
   try { parsed = new URL(url); } catch { return null; }
   if(parsed.protocol !== "https:" || parsed.username || parsed.password) return null;
-  return <aside className="ticket-link"><div><b>Un billet à prendre ?</b><p>Répondre sur BIMA ne réserve pas ta place. Chacun achète son billet sur la billetterie.</p><small>Site indiqué par l’organisateur : {parsed.hostname}</small></div><a href={url} target="_blank" rel="noopener noreferrer">Voir les billets ↗<span className="sr-only"> (nouvel onglet)</span></a></aside>;
+  return <aside className="ticket-link"><div><b>Un billet à prendre ?</b><p>Répondre sur BIMA ne réserve pas ta place. Chacun achète son billet sur la billetterie.</p>{afterResponse && <p>Vérifie la date avant de réserver : la sortie n’est pas encore confirmée.</p>}<small>Site indiqué par l’organisateur : {parsed.hostname}</small></div><a href={url} target="_blank" rel="noopener noreferrer">{afterResponse ? "Prends ton billet ↗" : "Voir les billets ↗"}<span className="sr-only"> (nouvel onglet)</span></a></aside>;
 }
 
 export function AvailableNames({names}: {names?: string[]}) {

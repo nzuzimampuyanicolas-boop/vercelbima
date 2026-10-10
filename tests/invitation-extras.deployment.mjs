@@ -1,7 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 const cli='C:/Users/ASUS/AppData/Local/pnpm-cache/dlx/0e538cc369833fac927062ae41a04b0f/pkg/node_modules/vercel/dist/index.js';
-const deployment='https://bima-7gcoh0dcq-bima6.vercel.app';
+const deployment=process.env.BIMA_PREVIEW_URL || 'https://bima-4i8rgoueo-bima6.vercel.app';
 const draft={title:'QA invitation extras',organizerName:'Test',organizerEmail:`deployment-${Date.now()}@example.com`,city:'Paris',maxPlaces:8,budgetEur:30,places:[{name:'Lieu test',address:'Paris',mapsUrl:''}],dates:[{startsAt:new Date(Date.now()+25*86400000).toISOString()}],ticketUrl:'https://example.com/billets',showAvailableNames:true};
 let created;
 try {

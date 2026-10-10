@@ -27,14 +27,17 @@ try{
  await guest.goto(base+created.sharePath);
  await guest.getByRole('region',{name:'La sortie en un coup d’œil'}).waitFor();
  await guest.getByText(/Ton prénom sera visible/).waitFor();
+ assert.equal(await guest.locator('.ticket-link').count(),0);
  await guest.getByLabel('Ton prénom',{exact:true}).fill('Camille');
  await guest.locator('.availability').first().click();
  await guest.getByRole('button',{name:/Valider mes réponses/}).click();
  await guest.getByRole('heading',{name:/Réponse enregistrée/}).waitFor();
+ assert.equal(await guest.getByRole('link',{name:/Prends ton billet/}).getAttribute('href'),'https://example.com/billets');
+ await guest.getByText(/Vérifie la date avant de réserver/).waitFor();
  const reader=await browser.newPage({viewport:{width:390,height:844}});
  await reader.goto(base+created.sharePath);
  await reader.locator('.available-names').filter({hasText:'Camille'}).waitFor();
- assert.equal(await reader.getByRole('link',{name:/Voir les billets/}).getAttribute('href'),'https://example.com/billets');
+ assert.equal(await reader.locator('.ticket-link').count(),0);
  for(const width of [320,390,1280]){
   await reader.setViewportSize({width,height:844});
   assert.equal(await reader.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false,`overflow ${width}`);
@@ -48,9 +51,13 @@ try{
  await p.locator('.event-edit-panel button[type=submit]').click();
  await p.locator('.event-edit-panel').waitFor({state:'hidden'});
  await reader.reload();
- await reader.getByRole('link',{name:/Voir les billets/}).waitFor();
+ await reader.getByRole('region',{name:'La sortie en un coup d’œil'}).waitFor();
  assert.equal(await reader.locator('.available-names').count(),0);
- assert.equal(await reader.getByRole('link',{name:/Voir les billets/}).getAttribute('href'),'https://example.com/nouvelle-billetterie');
+ assert.equal(await reader.locator('.ticket-link').count(),0);
+ await reader.getByLabel('Ton prénom',{exact:true}).fill('Indisponible');
+ await reader.getByRole('button',{name:/Valider mes réponses/}).click();
+ await reader.getByRole('heading',{name:/Réponse enregistrée/}).waitFor();
+ assert.equal(await reader.locator('.ticket-link').count(),0);
  await p.getByRole('button',{name:'Confirmer',exact:true}).click();
  await p.getByRole('button',{name:'Copier le lien du calendrier'}).waitFor();
  await reader.reload();
