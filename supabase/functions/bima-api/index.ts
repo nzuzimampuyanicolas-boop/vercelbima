@@ -1,5 +1,6 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts"
 import { createClient } from "npm:@supabase/supabase-js@2.95.0"
+import { ticketUrl, availableFirstNames } from "./invitation-extras.ts"
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!
 const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -366,7 +367,7 @@ async function subscribeProductUpdates(request: Request) {
 async function findEvent(slug: string) {
   const { data, error } = await db
     .from("bima_events")
-    .select("id,slug,manage_token_hash,organizer_name,organizer_email,title,city,max_places,budget_eur,response_deadline,confirmed_date_id,event_type,notify_new_responses,notify_reminders,notifications_started_at,created_at,updated_at")
+    .select("id,slug,manage_token_hash,organizer_name,organizer_email,title,city,max_places,budget_eur,response_deadline,confirmed_date_id,event_type,notify_new_responses,notify_reminders,notifications_started_at,created_at,updated_at,ticket_url,show_available_names")
     .eq("slug", slug)
     .maybeSingle()
   assertDatabase(error, "Impossible de charger cette sortie.")
@@ -453,6 +454,8 @@ async function readEvent(
       city: event.city,
       maxPlaces: event.max_places,
       budgetEur: event.budget_eur,
+      ticketUrl: event.ticket_url || null,
+      showAvailableNames: event.show_available_names === true,
       responseDeadline: event.response_deadline,
       confirmedDateId: event.confirmed_date_id,
       eventType: event.event_type === "stay" ? "stay" : "outing",
@@ -478,6 +481,7 @@ async function readEvent(
         startsAt: date.starts_at,
         endsAt: date.ends_at,
         availableCount: dateCounts.get(date.id) || 0,
+        availableNames: availableFirstNames(event.show_available_names === true, participants, date.id),
       })),
     },
     summary: {
@@ -561,6 +565,8 @@ function normalizeCreateDate(value: unknown): NormalizedDate | null {
 
 async function createEvent(request: Request) {
   const body = await request.json()
+  let bookingUrl: string | null
+  try { bookingUrl = ticketUrl(body.ticketUrl) } catch (error) { return json({ error: (error as Error).message }, 400) }
   if (cleanText(body.website, 200)) return json({ error: "Requête invalide." }, 400)
   const organizerName = cleanText(body.organizerName, 60)
   const organizerEmail = cleanText(body.organizerEmail, 254).toLowerCase()
@@ -648,6 +654,7 @@ async function createEvent(request: Request) {
     const { error: eventError } = await db.from("bima_events").insert({
       id: eventId, slug, manage_token_hash: await sha256(manageToken), organizer_name: organizerName, organizer_email: organizerEmail,
       title, city, max_places: maxPlaces, budget_eur: budgetEur, response_deadline: responseDeadline, event_type: eventType, ...attribution,
+      ticket_url: bookingUrl, show_available_names: body.showAvailableNames === true,
       notify_new_responses: true, notify_reminders: true, notifications_started_at: now,
       created_at: now, updated_at: now,
     })
@@ -698,6 +705,8 @@ async function updateEvent(request: Request, slug: string) {
   if (!await hasManageAccess(event, manageToken, manageShortCode)) return json({ error: "Lien de gestion invalide." }, 403)
 
   const title = cleanText(body.title, 120)
+  let bookingUrl: string | null
+  try { bookingUrl = ticketUrl(body.ticketUrl === undefined ? event.ticket_url : body.ticketUrl) } catch (error) { return json({ error: (error as Error).message }, 400) }
   const maxPlaces = Math.round(Number(body.maxPlaces))
   const budgetEur = body.budgetEur == null || body.budgetEur === "" ? null : Math.round(Number(body.budgetEur))
   const responseDeadline = typeof body.responseDeadline === "string" && body.responseDeadline ? body.responseDeadline.slice(0, 10) : null
@@ -830,6 +839,8 @@ async function updateEvent(request: Request, slug: string) {
     city: normalizedPlaces[0]?.address || event.city,
     max_places: maxPlaces,
     budget_eur: budgetEur,
+    ticket_url: bookingUrl,
+    show_available_names: typeof body.showAvailableNames === "boolean" ? body.showAvailableNames : event.show_available_names === true,
     response_deadline: responseDeadline,
     updated_at: now,
   }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { ticketUrl, availableFirstNames } from '../supabase/functions/bima-ux-preview/invitation-extras.ts';
+import { ticketUrl, availableFirstNames } from '../supabase/functions/bima-api/invitation-extras.ts';
 test('billetterie : HTTPS public, suppression et rejet des liens dangereux',()=>{
   assert.equal(ticketUrl(' https://example.com/tickets?q=1 '),'https://example.com/tickets?q=1');
   assert.equal(ticketUrl(''),null);
