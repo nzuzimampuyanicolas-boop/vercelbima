@@ -8,6 +8,7 @@ import CalendarSharingActions from "./components/CalendarSharingActions";
 import { InvitationOptions, TicketLink, AvailableNames } from "./components/InvitationExtras";
 
 type Mode = "home" | "create" | "share" | "respond" | "saved" | "manage" | "confirmed";
+const MAPS_INPUT_ENABLED = process.env.NEXT_PUBLIC_MAPS_INPUT_ENABLED === "true";
 
 const SCREEN_TITLES: Record<Mode, string> = {
   home: "",
@@ -831,7 +832,7 @@ function CreatePage({
           <label className="field"><span>Nombre de places</span><input type="number" min="2" max="200" step="1" value={maxPlaces} onChange={(event) => setMaxPlaces(event.target.value)} required /></label>
           <label className="field"><span>Budget par personne <i>optionnel</i></span><div className="input-suffix"><input type="number" min="10" step="10" value={budget} onChange={(event) => setBudget(event.target.value)} /><b>€</b></div></label>
           <InvitationOptions ticketUrl={ticketUrl} setTicketUrl={setTicketUrl} showNames={showAvailableNames} setShowNames={setShowAvailableNames} />
-          <div className="itinerary-heading"><span className="step-label">ITINÉRAIRE · 1 OU 2 LIEUX</span><h3>Comment va se dérouler la sortie ?</h3><p>Indique le lieu et sa ville. Tu peux ajouter un lien Google Maps classique si tu l’as.</p></div>
+          <div className="itinerary-heading"><span className="step-label">ITINÉRAIRE · 1 OU 2 LIEUX</span><h3>Comment va se dérouler la sortie ?</h3><p>Indique le lieu et sa ville.{MAPS_INPUT_ENABLED && " Tu peux ajouter un lien Google Maps classique si tu l’as."}</p></div>
           {places.map((place, index) => (
             <div className="place-editor full" key={index}>
               <label className="field itinerary-field">
@@ -839,8 +840,8 @@ function CreatePage({
                 <div className="stage-input-row">
                   <input value={place.name} onChange={(event) => setPlaces((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, name: event.target.value, data: null, error: "" } : item))} maxLength={160} placeholder="Nom du lieu" aria-label={`Nom du lieu de l’étape ${index + 1}`} required />
                   <input value={place.city} onChange={(event) => setPlaces((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, city: event.target.value, data: null, error: "" } : item))} maxLength={100} placeholder="Ville" aria-label={`Ville de l’étape ${index + 1}`} required />
-                  <div className="maps-input"><input value={place.mapsUrl} onChange={(event) => setPlaces((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, mapsUrl: event.target.value, data: null, error: "" } : item))} placeholder="Lien Google Maps (optionnel)" aria-describedby={`maps-help-${index}`} /><button type="button" onClick={() => void resolvePlace(index)} disabled={place.loading || !place.mapsUrl.trim()}>{place.loading ? "Recherche…" : "Prévisualiser"}</button></div>
-                  <small className="field-help maps-help" id={`maps-help-${index}`}>Lien facultatif · seuls les liens Google Maps classiques sont acceptés.</small>
+                  {MAPS_INPUT_ENABLED && <><div className="maps-input"><input value={place.mapsUrl} onChange={(event) => setPlaces((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, mapsUrl: event.target.value, data: null, error: "" } : item))} placeholder="Lien Google Maps (optionnel)" aria-describedby={`maps-help-${index}`} /><button type="button" onClick={() => void resolvePlace(index)} disabled={place.loading || !place.mapsUrl.trim()}>{place.loading ? "Recherche…" : "Prévisualiser"}</button></div>
+                  <small className="field-help maps-help" id={`maps-help-${index}`}>Lien facultatif · seuls les liens Google Maps classiques sont acceptés.</small></>}
                 </div>
               </label>
               {place.error && <p className="inline-error">{place.error}</p>}
@@ -1112,7 +1113,7 @@ function EditEventPanel({ event, participantCount, voters, busy, onCancel, onSav
         <label className="field full"><span>Date limite de réponse</span><input type="date" value={deadline} onChange={(input) => setDeadline(input.target.value)} /></label>
         <InvitationOptions ticketUrl={ticketUrl} setTicketUrl={setTicketUrl} showNames={showAvailableNames} setShowNames={setShowAvailableNames} />
       </div>
-      <div className="edit-places"><span className="step-label">LIEU{places.length > 1 ? "X" : ""}</span>{places.map((place, index) => <fieldset key={place.id}><legend>Étape {index + 1}</legend><label className="field"><span>Nom du lieu</span><input value={place.name} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, name: input.target.value } : item))} maxLength={160} required /></label><label className="field"><span>Ville</span><input value={place.address} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, address: input.target.value } : item))} maxLength={100} required /></label><label className="field full"><span>Lien Google Maps (optionnel)</span><input type="url" value={place.mapsUrl} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, mapsUrl: input.target.value } : item))} placeholder="https://www.google.com/maps/..." /></label></fieldset>)}</div>
+<div className="edit-places"><span className="step-label">LIEU{places.length > 1 ? "X" : ""}</span>{places.map((place, index) => <fieldset key={place.id}><legend>Étape {index + 1}</legend><label className="field"><span>Nom du lieu</span><input value={place.name} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, name: input.target.value } : item))} maxLength={160} required /></label><label className="field"><span>Ville</span><input value={place.address} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, address: input.target.value } : item))} maxLength={100} required /></label>{MAPS_INPUT_ENABLED && <label className="field full"><span>Lien Google Maps (optionnel)</span><input type="url" value={place.mapsUrl} onChange={(input) => setPlaces((current) => current.map((item) => item.id === place.id ? { ...item, mapsUrl: input.target.value } : item))} placeholder="https://www.google.com/maps/..." /></label>}</fieldset>)}</div>
       <section className="edit-dates" aria-labelledby="edit-dates-title">
         <div><span className="step-label">{event.eventType === "stay" ? "PÉRIODES" : "DATES"}</span><h4 id="edit-dates-title">Quand aura lieu {event.eventType === "stay" ? "le séjour" : "la sortie"} ?</h4><small>Entre 1 et 4 propositions.</small></div>
         {dates.map((date, index) => <div className={`date-input ${event.eventType === "stay" ? "stay-range" : ""}`} key={date.id}>

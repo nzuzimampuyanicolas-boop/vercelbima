@@ -22,7 +22,13 @@ try {
   const page = await browser.newPage({viewport:{width:390,height:844}});
   const errors=[]; page.on('pageerror',error=>errors.push(error.message));
   await page.goto(site+'/creer');
+  assert.equal(await page.getByPlaceholder('Lien Google Maps (optionnel)').count(),0);
+  await page.getByLabel('Nom du lieu de l’étape 1').waitFor();
+  await page.getByLabel('Ville de l’étape 1').waitFor();
   assert.equal(await page.getByRole('checkbox',{name:/Montrer les prénoms/}).isChecked(),true);
+  await page.goto(site+created.managePath);
+  await page.getByRole('button',{name:'Modifier les informations'}).click();
+  assert.equal(await page.getByPlaceholder('https://www.google.com/maps/...').count(),0);
   await page.goto(site+created.sharePath);
   await page.getByRole('region',{name:'La sortie en un coup d’œil'}).waitFor();
   assert.equal(await page.locator('.ticket-link').count(),0);
